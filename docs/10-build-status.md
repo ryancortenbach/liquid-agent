@@ -12,7 +12,8 @@ Updated 2026-09-13.
 - Generated photo records containing the source link, hash, model, prompt, preset, and disclosure
 - Mandatory seller review before an enhanced image can join the listing image set
 - Authenticated BlueBubbles webhook with sender allowlisting and event deduplication
-- Complete iMessage photo intake, enhancement preview, approval, rejection, and status flow
+- Complete iMessage photo intake, OpenAI product identification, enhancement preview, approval,
+  rejection, and status flow
 - eBay sandbox inventory, reusable offer draft, and seller-approved publication flow
 - SQLite sale claims that pause duplicates and support confirmed or failed marketplace closes
 - Deadline pricing engine, guard, ledger, outbox, simulation, and evaluation artifacts
@@ -21,13 +22,12 @@ Updated 2026-09-13.
 
 ## Ordered P0 queue
 
-1. Add product identity and defect extraction before image editing.
-2. Add automated comparison checks between original and generated images.
-3. Complete a live BlueBubbles and OpenAI smoke test after credentials are configured.
-4. Complete a live eBay sandbox smoke test after seller policies are configured.
-5. Build the assisted Facebook Marketplace publication flow.
-6. Add the outbox delivery worker and restart tests.
-7. Build the demo dashboard and recorded scenario.
+1. Add automated comparison checks between original and generated images.
+2. Complete a live BlueBubbles and OpenAI smoke test after credentials are configured.
+3. Complete a live eBay sandbox smoke test after seller policies are configured.
+4. Build the assisted Facebook Marketplace publication flow.
+5. Add the outbox delivery worker and restart tests.
+6. Build the demo dashboard and recorded scenario.
 
 ## Local setup blockers
 

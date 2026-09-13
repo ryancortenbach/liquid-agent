@@ -98,6 +98,7 @@ async def run(live: bool) -> int:
 
     checks = [
         ("OpenAI image editing", settings.openai_api_key, "OPENAI_API_KEY"),
+        ("OpenAI item identification", settings.openai_api_key, "OPENAI_API_KEY"),
         ("eBay Browse", settings.ebay_client_id and settings.ebay_client_secret, "eBay keys"),
         ("Shippo", settings.shippo_api_key, "SHIPPO_API_KEY"),
         ("Claude", settings.anthropic_api_key, "ANTHROPIC_API_KEY"),

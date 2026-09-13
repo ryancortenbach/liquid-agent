@@ -32,7 +32,7 @@ from app.engine.frontier import compute_frontier
 from app.engine.load_state import load_state
 from app.engine.policy import decide
 from app.engine.state import ItemState, default_channels
-from app.inbound.identify import ClaudeIdentifier, Identifier
+from app.inbound.identify import ClaudeIdentifier, Identifier, OpenAIIdentifier
 from app.intake.details import IntakeDetails, merge_details
 from app.intake.flow import ListingFlow, pack_dict
 from app.intake.router import PipelineRouter
@@ -245,7 +245,12 @@ def create_app(
             )
             app.state.owns_ebay_connections = True
         app.state.identifier = identifier
-        if app.state.identifier is None and app_settings.anthropic_api_key:
+        if app.state.identifier is None and app_settings.openai_api_key:
+            app.state.identifier = OpenAIIdentifier(
+                app_settings.openai_api_key,
+                model=app_settings.openai_vision_model,
+            )
+        elif app.state.identifier is None and app_settings.anthropic_api_key:
             app.state.identifier = ClaudeIdentifier(
                 app_settings.anthropic_api_key, model=app_settings.claude_model
             )

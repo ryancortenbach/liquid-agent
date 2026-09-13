@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
@@ -9,6 +10,7 @@ from app.inbound.identify import (
     Candidate,
     CaptionIdentifier,
     ItemIdentity,
+    OpenAIIdentifier,
     interpret_confirmation,
 )
 from app.main import create_app
@@ -16,6 +18,7 @@ from app.models import ConversationStatus, Item, LedgerEvent, ProductPhoto, Sell
 from tests.test_listing_flow import (
     FakeMessageAdapter,
     FakePhotoEditor,
+    jpeg_bytes,
     make_settings,
     payload,
 )
@@ -76,6 +79,51 @@ def test_caption_identifier_uses_the_caption() -> None:
     assert identity.title == "Sony WH-1000XM5 headphones"
     assert identity.brand == "Sony" and identity.category == "headphones"
     assert identity.confidence == 0.5
+
+
+def test_openai_identifier_sends_image_and_parses_identity() -> None:
+    import asyncio
+
+    calls: list[dict] = []
+
+    class FakeResponses:
+        async def parse(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(output_parsed=IDENTITY)
+
+    identifier = OpenAIIdentifier(
+        "unused-test-key",
+        client=SimpleNamespace(responses=FakeResponses()),
+    )
+    identity = asyncio.run(identifier.identify(jpeg_bytes(), "image/jpeg", "sell this"))
+
+    assert identity == IDENTITY
+    assert calls[0]["model"] == "gpt-5.4-mini"
+    assert calls[0]["store"] is False
+    assert calls[0]["text_format"] is ItemIdentity
+    content = calls[0]["input"][0]["content"]
+    assert content[0]["type"] == "input_image"
+    assert content[0]["image_url"].startswith("data:image/jpeg;base64,")
+    assert content[1]["text"] == "Seller's caption: sell this"
+
+
+def test_openai_identifier_falls_back_to_caption() -> None:
+    import asyncio
+
+    class FailingResponses:
+        async def parse(self, **kwargs):
+            raise RuntimeError("temporary failure")
+
+    identifier = OpenAIIdentifier(
+        "unused-test-key",
+        client=SimpleNamespace(responses=FailingResponses()),
+    )
+    identity = asyncio.run(
+        identifier.identify(jpeg_bytes(), "image/jpeg", "Sony WH-1000XM5 headphones")
+    )
+
+    assert identity.title == "Sony WH-1000XM5 headphones"
+    assert identity.brand == "Sony"
 
 
 def test_identify_then_confirm_then_enhance(tmp_path: Path) -> None:

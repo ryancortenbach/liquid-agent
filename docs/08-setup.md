@@ -13,11 +13,12 @@ uv run pytest
 1. Create an API key at `https://platform.openai.com/api-keys`.
 2. Put it in `.env` as `OPENAI_API_KEY`. Never commit the key.
 3. Keep `OPENAI_IMAGE_MODEL=gpt-image-2.5-sunburst` for the highest edit precision.
-4. Complete API organization verification if the OpenAI console requires it for image models.
-5. Start the app and open `http://localhost:8000/docs`.
-6. Create an item with `POST /api/items`.
-7. Send an iPhone HEIC, JPEG, PNG, or WebP to `POST /api/items/{item_id}/photos/enhance`.
-8. Compare both returned image URLs, then call the review endpoint with `{"approved": true}`.
+4. Keep `OPENAI_VISION_MODEL=gpt-5.4-mini` to identify the product before editing it.
+5. Complete API organization verification if the OpenAI console requires it for image models.
+6. Start the app and open `http://localhost:8000/docs`.
+7. Create an item with `POST /api/items`.
+8. Send an iPhone HEIC, JPEG, PNG, or WebP to `POST /api/items/{item_id}/photos/enhance`.
+9. Compare both returned image URLs, then call the review endpoint with `{"approved": true}`.
 
 The generated image remains in `review` until the seller approves it. The original is always kept.
 
