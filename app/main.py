@@ -20,6 +20,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import Engine
 from sqlalchemy.exc import IntegrityError
@@ -450,6 +451,11 @@ def create_app(
 
     app = FastAPI(title="Liquid", version="0.1.0", lifespan=lifespan)
     app.include_router(dashboard_router)
+    app.mount(
+        "/assets",
+        StaticFiles(directory=Path(__file__).parent.parent / "dist" / "assets"),
+        name="landing-assets",
+    )
 
     @app.get("/", response_class=HTMLResponse)
     def landing_page() -> FileResponse:

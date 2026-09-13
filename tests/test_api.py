@@ -62,3 +62,7 @@ def test_landing_page_opens_liquid_imessage_chat() -> None:
     assert response.status_code == 200
     assert "the friend that helps your stuff" in response.text
     assert 'href="sms:+17027428016"' in response.text
+
+    asset = client.get("/assets/approve-item.webp")
+    assert asset.status_code == 200
+    assert asset.headers["content-type"] == "image/webp"
