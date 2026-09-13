@@ -451,6 +451,10 @@ def create_app(
     app = FastAPI(title="Liquid", version="0.1.0", lifespan=lifespan)
     app.include_router(dashboard_router)
 
+    @app.get("/", response_class=HTMLResponse)
+    def landing_page() -> FileResponse:
+        return FileResponse(Path(__file__).parent.parent / "dist" / "index.html")
+
     @app.get("/health")
     def health(clock: ClockDep) -> dict:
         return {

@@ -53,3 +53,12 @@ def test_plan_endpoint_is_credential_free() -> None:
         payload = response.json()
         assert payload["instant_cents"] == 14_760
         assert [point["hours"] for point in payload["frontier"]] == [24, 72, 168]
+
+
+def test_landing_page_opens_liquid_imessage_chat() -> None:
+    app = create_app(Settings(mode=Mode.SIM, database_url="sqlite:///:memory:"))
+    with TestClient(app) as client:
+        response = client.get("/")
+    assert response.status_code == 200
+    assert "the friend that helps your stuff" in response.text
+    assert 'href="sms:+17027428016"' in response.text
