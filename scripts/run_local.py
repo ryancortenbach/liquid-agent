@@ -10,6 +10,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run Liquid without logging webhook secrets")
     parser.add_argument("--reload", action="store_true")
     arguments = parser.parse_args()
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
     logging.getLogger("app").setLevel(logging.INFO)
     uvicorn.run(
         "app.main:app",
