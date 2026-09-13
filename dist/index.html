@@ -3,22 +3,22 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#75cfff">
+  <meta name="theme-color" content="#bdebee">
   <meta name="description" content="Text Liquid a photo. Get a polished listing ready to sell.">
   <title>Liquid | Your friendly selling assistant</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%2311182d'/%3E%3Cpath d='M32 10C26 21 18 29 18 39a14 14 0 0 0 28 0c0-10-8-18-14-29Z' fill='%2379dcff'/%3E%3Ccircle cx='27' cy='36' r='3' fill='%2311182d'/%3E%3Ccircle cx='37' cy='36' r='3' fill='%2311182d'/%3E%3Cpath d='M26 43c4 3 8 3 12 0' fill='none' stroke='%2311182d' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%231d5962'/%3E%3Cpath d='M32 10C26 21 18 29 18 39a14 14 0 0 0 28 0c0-10-8-18-14-29Z' fill='%23bdebee'/%3E%3Ccircle cx='27' cy='36' r='3' fill='%231d5962'/%3E%3Ccircle cx='37' cy='36' r='3' fill='%231d5962'/%3E%3Cpath d='M26 43c4 3 8 3 12 0' fill='none' stroke='%231d5962' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
   <style>
     :root {
-      --sky: #7dd3ff;
-      --sky-deep: #42b7f1;
-      --mist: #dff7ff;
-      --ink: #11182d;
-      --soft-ink: #38506c;
-      --lime: #cbff72;
-      --foam: #f7fdff;
-      --blue: #168cf0;
-      --line: rgba(17, 24, 45, 0.14);
-      --shadow: 0 24px 70px rgba(16, 51, 87, 0.22);
+      --sky: #bdebee;
+      --sky-deep: #83ced5;
+      --mist: #e9f9f8;
+      --ink: #174850;
+      --soft-ink: #4d747a;
+      --accent: #66c6bd;
+      --foam: #f6fbfb;
+      --white: #ffffff;
+      --line: rgba(23, 72, 80, 0.12);
+      --shadow: 0 26px 70px rgba(49, 118, 125, 0.16);
     }
 
     * { box-sizing: border-box; }
@@ -27,9 +27,9 @@
       margin: 0;
       color: var(--ink);
       background: var(--foam);
-      font-family: ui-rounded, "SF Pro Rounded", "Arial Rounded MT Bold", Inter, system-ui, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
       font-size: 16px;
-      line-height: 1.45;
+      line-height: 1.5;
       overflow-x: hidden;
     }
     a { color: inherit; }
@@ -41,9 +41,9 @@
       overflow: hidden;
       isolation: isolate;
       background:
-        radial-gradient(circle at 78% 16%, rgba(255,255,255,.42), transparent 22%),
-        radial-gradient(circle at 15% 34%, rgba(29,137,221,.3), transparent 30%),
-        linear-gradient(180deg, var(--sky) 0%, #76cefb 58%, var(--mist) 100%);
+        radial-gradient(circle at 78% 16%, rgba(255,255,255,.66), transparent 24%),
+        radial-gradient(circle at 12% 34%, rgba(102,198,189,.22), transparent 32%),
+        linear-gradient(155deg, #dff8f4 0%, var(--sky) 42%, #a9dbe5 76%, var(--mist) 100%);
     }
     .hero::after {
       content: "";
@@ -59,7 +59,7 @@
       position: absolute;
       inset: 0;
       z-index: -2;
-      opacity: .55;
+      opacity: .42;
       background:
         radial-gradient(ellipse at 30% 70%, transparent 0 30%, rgba(255,255,255,.34) 31% 34%, transparent 35% 100%),
         radial-gradient(ellipse at 70% 55%, transparent 0 28%, rgba(255,255,255,.28) 29% 31%, transparent 32% 100%);
@@ -80,9 +80,9 @@
       display: inline-flex;
       align-items: center;
       gap: 10px;
-      font-size: 1.55rem;
-      font-weight: 850;
-      letter-spacing: -.05em;
+      font-size: 1.45rem;
+      font-weight: 680;
+      letter-spacing: -.045em;
       text-decoration: none;
     }
     .drop-mark {
@@ -91,9 +91,10 @@
       display: grid;
       place-items: center;
       border-radius: 52% 48% 56% 44% / 58% 44% 56% 42%;
-      color: var(--mist);
-      background: var(--ink);
-      box-shadow: inset 4px 5px 0 rgba(255,255,255,.14);
+      color: var(--ink);
+      background: rgba(255,255,255,.62);
+      border: 1px solid rgba(255,255,255,.9);
+      box-shadow: inset 4px 5px 12px rgba(255,255,255,.52), 0 8px 24px rgba(38,111,118,.12);
       transform: rotate(-8deg);
     }
     .drop-mark::before {
@@ -111,24 +112,24 @@
       gap: 4px;
       padding: 6px;
       border: 1px solid rgba(255,255,255,.68);
-      border-radius: 999px;
-      background: rgba(247,253,255,.76);
+      border-radius: 20px;
+      background: rgba(246,251,251,.72);
       box-shadow: 0 8px 30px rgba(42,110,151,.13);
       backdrop-filter: blur(18px);
     }
     .nav-links a {
       padding: 9px 16px;
-      border-radius: 999px;
+      border-radius: 14px;
       font-size: .9rem;
-      font-weight: 700;
+      font-weight: 620;
       text-decoration: none;
     }
     .nav-links a:hover { background: rgba(255,255,255,.68); }
     .nav-links .nav-cta {
-      color: white;
+      color: var(--white);
       background: var(--ink);
     }
-    .nav-links .nav-cta:hover { background: #25304c; }
+    .nav-links .nav-cta:hover { background: #24616a; }
 
     .hero-copy {
       width: min(890px, calc(100% - 40px));
@@ -140,12 +141,12 @@
       align-items: center;
       gap: 8px;
       padding: 8px 13px;
-      border: 1px solid rgba(17,24,45,.26);
+      border: 1px solid rgba(23,72,80,.14);
       border-radius: 999px;
       background: rgba(255,255,255,.48);
       font-size: .84rem;
-      font-weight: 800;
-      letter-spacing: .02em;
+      font-weight: 650;
+      letter-spacing: .06em;
       text-transform: uppercase;
     }
     .eyebrow::before {
@@ -153,30 +154,30 @@
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: #20a967;
-      box-shadow: 0 0 0 5px rgba(32,169,103,.12);
+      background: var(--accent);
+      box-shadow: 0 0 0 5px rgba(102,198,189,.14);
     }
     h1 {
       max-width: 850px;
       margin: 22px auto 18px;
       font-size: clamp(3.3rem, 8vw, 6.8rem);
-      line-height: .91;
-      letter-spacing: -.075em;
-      font-weight: 860;
+      line-height: .94;
+      letter-spacing: -.055em;
+      font-weight: 660;
     }
     h1 em {
       display: inline-block;
-      color: white;
+      color: rgba(255,255,255,.98);
       font-family: Georgia, "Times New Roman", serif;
       font-weight: 400;
-      letter-spacing: -.055em;
-      text-shadow: 0 3px 0 rgba(40,137,195,.2);
-      transform: rotate(-2deg);
+      letter-spacing: -.04em;
+      text-shadow: 0 3px 16px rgba(39,119,127,.15);
+      transform: rotate(-1deg);
     }
     .hero-copy > p {
       max-width: 650px;
       margin: 0 auto;
-      color: #264866;
+      color: #396970;
       font-size: clamp(1.05rem, 2vw, 1.25rem);
     }
     .hero-actions {
@@ -193,39 +194,31 @@
       gap: 11px;
       min-height: 58px;
       padding: 0 28px;
-      color: white;
+      color: var(--white);
       background: var(--ink);
       border: 0;
-      border-radius: 999px;
-      box-shadow: 0 10px 0 rgba(17,24,45,.16), 0 18px 34px rgba(17,24,45,.2);
-      font-weight: 850;
+      border-radius: 18px;
+      box-shadow: 0 10px 0 rgba(23,72,80,.12), 0 18px 34px rgba(40,101,108,.16);
+      font-weight: 650;
       text-decoration: none;
       transition: transform .2s ease, box-shadow .2s ease;
     }
     .primary:hover {
       transform: translateY(-3px);
-      box-shadow: 0 13px 0 rgba(17,24,45,.14), 0 22px 38px rgba(17,24,45,.24);
+      box-shadow: 0 13px 0 rgba(23,72,80,.1), 0 22px 38px rgba(40,101,108,.2);
     }
     .primary:active { transform: translateY(1px); }
     .primary .bubble {
-      width: 24px;
-      height: 19px;
+      width: 20px;
+      height: 20px;
+      flex: 0 0 20px;
       border-radius: 50%;
-      background: var(--lime);
+      background: #9de7d8;
       position: relative;
-    }
-    .primary .bubble::after {
-      content: "";
-      position: absolute;
-      right: 1px;
-      bottom: -3px;
-      border: 5px solid transparent;
-      border-top-color: var(--lime);
-      transform: rotate(-22deg);
     }
     .microcopy {
       margin-top: 18px;
-      color: rgba(17,24,45,.62);
+      color: rgba(23,72,80,.66);
       font-size: .92rem;
       font-weight: 650;
     }
@@ -243,18 +236,19 @@
       top: 30px;
       width: 326px;
       height: 610px;
-      padding: 11px;
-      border: 4px solid #151927;
+      padding: 10px;
+      border: 1px solid rgba(255,255,255,.9);
       border-radius: 52px;
-      background: #090b10;
-      box-shadow: 0 44px 80px rgba(29,80,117,.34), inset 0 0 0 2px #777;
-      transform: translateX(-50%) rotate(-1.8deg);
+      background: rgba(218,244,243,.76);
+      box-shadow: 0 44px 90px rgba(46,112,119,.22), inset 0 0 0 2px rgba(83,153,158,.22), inset 0 0 30px rgba(255,255,255,.7);
+      backdrop-filter: blur(16px);
+      transform: translateX(-50%) rotate(-.8deg);
     }
     .phone-screen {
       height: 100%;
       overflow: hidden;
       border-radius: 38px;
-      background: #f5f5f7;
+      background: #f7f9f9;
     }
     .phone-top {
       height: 30px;
@@ -267,13 +261,13 @@
       width: 84px;
       height: 23px;
       border-radius: 99px;
-      background: #050505;
+      background: #285e66;
       transform: translateX(-50%);
     }
     .chat-head {
       padding: 12px 15px 10px;
       text-align: center;
-      border-bottom: 1px solid #dedee2;
+      border-bottom: 1px solid #d7e7e6;
     }
     .avatar {
       width: 48px;
@@ -282,9 +276,9 @@
       display: grid;
       place-items: center;
       color: var(--ink);
-      background: linear-gradient(145deg, var(--lime), #77dfff);
+      background: linear-gradient(145deg, #b5eee4, #8dcfd8);
       border-radius: 47% 53% 44% 56% / 54% 45% 55% 46%;
-      font-weight: 900;
+      font-weight: 700;
       box-shadow: inset 5px 5px 0 rgba(255,255,255,.38);
     }
     .chat-head strong { display: block; font-size: .92rem; }
@@ -305,21 +299,16 @@
       border-radius: 18px;
       box-shadow: 0 1px 0 rgba(0,0,0,.08);
     }
-    .message.agent { align-self: flex-start; background: #e5e5e9; border-bottom-left-radius: 5px; }
-    .message.seller { align-self: flex-end; color: white; background: #1689ff; border-bottom-right-radius: 5px; }
+    .message.agent { align-self: flex-start; background: #e5eeee; border-bottom-left-radius: 5px; }
+    .message.seller { align-self: flex-end; color: white; background: #4b9eaa; border-bottom-right-radius: 5px; }
     .photo-tile {
       align-self: flex-end;
       width: 166px;
       height: 96px;
-      display: grid;
-      place-items: center;
+      display: block;
+      object-fit: cover;
       border-radius: 18px 18px 5px 18px;
-      color: #21516f;
-      background:
-        radial-gradient(circle at 25% 26%, rgba(255,255,255,.82) 0 8%, transparent 9%),
-        linear-gradient(135deg, #a3efff, #cbff72);
-      font-weight: 800;
-      box-shadow: inset 0 0 0 1px rgba(17,24,45,.1);
+      box-shadow: inset 0 0 0 1px rgba(23,72,80,.1);
     }
     .typing { display: inline-flex; gap: 4px; align-items: center; }
     .typing i { width: 6px; height: 6px; border-radius: 50%; background: #777; animation: blink 1.1s infinite; }
@@ -331,29 +320,29 @@
       z-index: 2;
       min-width: 170px;
       padding: 15px 18px;
-      border: 1px solid rgba(255,255,255,.68);
-      border-radius: 22px;
-      background: rgba(247,253,255,.74);
+      border: 1px solid rgba(255,255,255,.76);
+      border-radius: 18px;
+      background: rgba(246,251,251,.78);
       box-shadow: var(--shadow);
       backdrop-filter: blur(18px);
       font-size: .86rem;
-      font-weight: 760;
+      font-weight: 620;
       animation: bob 4.8s ease-in-out infinite;
     }
-    .float-card strong { display: block; margin-bottom: 3px; font-size: 1.12rem; }
+    .float-card strong { display: block; margin-bottom: 3px; font-size: 1.08rem; font-weight: 660; }
     .float-card small { color: var(--soft-ink); font-size: .76rem; }
     .float-card.one { left: 3%; top: 120px; transform: rotate(-6deg); }
     .float-card.two { right: 1%; top: 145px; transform: rotate(5deg); animation-delay: -.8s; }
     .float-card.three { left: 8%; top: 330px; transform: rotate(4deg); animation-delay: -1.5s; }
     .float-card.four { right: 6%; top: 355px; transform: rotate(-5deg); animation-delay: -2.3s; }
     .status-line { display: flex; align-items: center; gap: 7px; }
-    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #20a967; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
     .mini-wave {
       width: 100%;
       height: 5px;
       margin-top: 9px;
       border-radius: 999px;
-      background: linear-gradient(90deg, var(--blue) 0 72%, rgba(22,140,240,.15) 72%);
+      background: linear-gradient(90deg, var(--accent) 0 72%, rgba(102,198,189,.16) 72%);
     }
 
     .section {
@@ -363,18 +352,19 @@
     }
     .section-kicker {
       margin: 0 0 14px;
-      color: #16865b;
+      color: #3f8f8a;
       font-size: .8rem;
-      font-weight: 850;
-      letter-spacing: .12em;
+      font-weight: 680;
+      letter-spacing: .1em;
       text-transform: uppercase;
     }
     h2 {
       max-width: 760px;
       margin: 0;
       font-size: clamp(2.4rem, 5.5vw, 5rem);
-      line-height: .98;
-      letter-spacing: -.06em;
+      line-height: 1.02;
+      letter-spacing: -.045em;
+      font-weight: 650;
     }
     .steps {
       display: grid;
@@ -383,28 +373,48 @@
       margin-top: 50px;
     }
     .step {
-      min-height: 310px;
-      padding: 26px;
+      min-height: 430px;
+      padding: 12px 12px 26px;
       display: flex;
       flex-direction: column;
-      justify-content: space-between;
+      gap: 24px;
       border: 1px solid var(--line);
-      border-radius: 30px;
+      border-radius: 28px;
       background: white;
       box-shadow: 0 15px 35px rgba(44,85,113,.08);
     }
-    .step:nth-child(2) { background: #eaf9ff; }
-    .step:nth-child(3) { background: #efffd4; }
+    .step:nth-child(2) { background: #f2fbfa; }
+    .step:nth-child(3) { background: #eaf6f7; }
+    .step-image {
+      position: relative;
+      height: 220px;
+      overflow: hidden;
+      border-radius: 20px;
+      background: var(--mist);
+    }
+    .step-image img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+    }
     .step-num {
       width: 42px;
       height: 42px;
       display: grid;
       place-items: center;
-      border: 1px solid var(--line);
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      border: 1px solid rgba(255,255,255,.86);
       border-radius: 50%;
-      font-weight: 850;
+      background: rgba(246,251,251,.84);
+      box-shadow: 0 6px 20px rgba(43,100,106,.12);
+      backdrop-filter: blur(10px);
+      font-weight: 650;
     }
-    .step h3 { margin: 0 0 10px; font-size: 1.55rem; letter-spacing: -.035em; }
+    .step > div:last-child { padding: 0 12px; }
+    .step h3 { margin: 0 0 9px; font-size: 1.45rem; font-weight: 650; letter-spacing: -.025em; }
     .step p { margin: 0; color: var(--soft-ink); }
 
     .proof {
@@ -422,31 +432,25 @@
     .market-card {
       padding: 22px;
       border: 1px solid var(--line);
-      border-radius: 32px;
-      background: white;
+      border-radius: 28px;
+      background: rgba(255,255,255,.88);
       box-shadow: var(--shadow);
       transform: rotate(2deg);
     }
     .market-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-    .market-top span { color: #16865b; font-weight: 800; }
+    .market-top span { color: #3f8f8a; font-weight: 650; }
     .product-art {
       height: 240px;
       margin: 20px 0;
-      display: grid;
-      place-items: center;
+      width: 100%;
+      display: block;
+      object-fit: cover;
       border-radius: 22px;
-      background:
-        radial-gradient(circle at 34% 35%, rgba(255,255,255,.8) 0 8%, transparent 9%),
-        radial-gradient(circle at 62% 58%, #cbff72 0 18%, transparent 19%),
-        linear-gradient(135deg, #79ddff, #d7f7ff);
-      color: #214664;
-      font-size: 1.1rem;
-      font-weight: 850;
     }
-    .listing-title { margin: 0; font-size: 1.4rem; }
-    .listing-row { display: flex; justify-content: space-between; margin-top: 14px; font-weight: 800; }
+    .listing-title { margin: 0; font-size: 1.4rem; font-weight: 650; }
+    .listing-row { display: flex; justify-content: space-between; margin-top: 14px; font-weight: 650; }
     .channels { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 8px; }
-    .channels span { padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; font-size: .78rem; font-weight: 750; }
+    .channels span { padding: 7px 11px; border: 1px solid var(--line); border-radius: 11px; font-size: .78rem; font-weight: 620; }
 
     .final-wrap {
       width: min(1180px, calc(100% - 30px));
@@ -458,9 +462,9 @@
       color: white;
       border-radius: 42px;
       background:
-        radial-gradient(circle at 15% 10%, rgba(121,220,255,.34), transparent 28%),
-        radial-gradient(circle at 86% 80%, rgba(203,255,114,.22), transparent 27%),
-        var(--ink);
+        radial-gradient(circle at 15% 10%, rgba(167,232,226,.24), transparent 28%),
+        radial-gradient(circle at 86% 80%, rgba(124,207,213,.24), transparent 27%),
+        #1b525b;
     }
     .final-wrap::before {
       content: "";
@@ -475,7 +479,7 @@
     }
     .final-wrap h2 { margin: 0 auto 18px; }
     .final-wrap p { max-width: 540px; margin: 0 auto 28px; color: #c9d7eb; font-size: 1.08rem; }
-    .final-wrap .primary { color: var(--ink); background: var(--lime); box-shadow: none; }
+    .final-wrap .primary { color: var(--ink); background: #d7f7f1; box-shadow: none; }
     footer {
       width: min(1120px, calc(100% - 40px));
       margin: 0 auto;
@@ -519,7 +523,7 @@
       .proof { gap: 46px; }
     }
     @media (max-width: 520px) {
-      h1 { font-size: clamp(3.2rem, 17vw, 5rem); }
+      h1 { font-size: clamp(3.05rem, 15.5vw, 4.8rem); line-height: .96; letter-spacing: -.045em; }
       .hero-copy > p { font-size: 1rem; }
       .hero-actions { flex-direction: column; }
       .primary { width: min(100%, 300px); }
@@ -585,7 +589,7 @@
             <div class="messages">
               <div class="message agent">Hey, what's up? What are we selling today?</div>
               <div class="message seller">Can you sell these headphones by Sunday? Nothing under $170.</div>
-              <div class="photo-tile">3 product photos</div>
+              <img class="photo-tile" src="assets/send-item.webp" alt="Three product photos of blue headphones">
               <div class="message agent">Yep. I'll clean up the photos and check what they're selling for.</div>
               <div class="message agent">I found the Sony WH-1000XM5. Does that look right?</div>
               <div class="message seller">Yes, go for it.</div>
@@ -601,15 +605,15 @@
       <h2>You text. Liquid handles the selling work.</h2>
       <div class="steps">
         <article class="step">
-          <span class="step-num">01</span>
+          <div class="step-image"><img src="assets/send-item.webp" alt="Photographing blue headphones to send to Liquid"><span class="step-num">01</span></div>
           <div><h3>Send it</h3><p>Text one photo, a few angles, or a whole batch. Tell Liquid how fast you want it gone.</p></div>
         </article>
         <article class="step">
-          <span class="step-num">02</span>
+          <div class="step-image"><img src="assets/approve-item.webp" alt="Clean product photo of blue headphones"><span class="step-num">02</span></div>
           <div><h3>Approve it</h3><p>Review cleaner photos, a truthful description, and a price based on what similar items sell for.</p></div>
         </article>
         <article class="step">
-          <span class="step-num">03</span>
+          <div class="step-image"><img src="assets/move-item.webp" alt="Blue headphones prepared for their buyer"><span class="step-num">03</span></div>
           <div><h3>Let it move</h3><p>Liquid prepares every marketplace listing, sends you the links, and keeps an eye on offers and sales.</p></div>
         </article>
       </div>
@@ -626,7 +630,7 @@
       </div>
       <div class="market-card" aria-label="Example listing created by Liquid">
         <div class="market-top"><strong>Liquid listing preview</strong><span>Ready</span></div>
-        <div class="product-art">clean product photo</div>
+        <img class="product-art" src="assets/approve-item.webp" alt="Clean product photo prepared by Liquid">
         <h3 class="listing-title">Sony WH-1000XM5 Wireless Headphones</h3>
         <div class="listing-row"><span>Like new</span><span>$220</span></div>
         <div class="channels"><span>3 photos</span><span>Price checked</span><span>Seller approved</span></div>
