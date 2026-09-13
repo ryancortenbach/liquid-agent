@@ -9,6 +9,8 @@ from sqlmodel import Session, select
 from app.inbound.identify import (
     Candidate,
     CaptionIdentifier,
+    InventoryDetection,
+    InventoryItem,
     ItemIdentity,
     OpenAIIdentifier,
     interpret_confirmation,
@@ -62,6 +64,32 @@ class SequenceIdentifier:
 
     async def identify(self, content: bytes, mime_type: str, caption: str) -> ItemIdentity:
         return next(self.identities)
+
+
+class FakeInventoryIdentifier:
+    async def identify(self, content: bytes, mime_type: str, caption: str) -> ItemIdentity:
+        raise AssertionError("single-item identification should not run")
+
+    async def detect_all(
+        self, content: bytes, mime_type: str, caption: str
+    ) -> InventoryDetection:
+        return InventoryDetection(
+            items=[
+                InventoryItem(
+                    **IDENTITY.model_dump(),
+                    box_2d=[0, 0, 1000, 500],
+                ),
+                InventoryItem(
+                    title="Sony WH-1000XM5 headphones",
+                    brand="Sony",
+                    model="WH-1000XM5",
+                    category="headphones",
+                    condition_guess="B",
+                    confidence=0.8,
+                    box_2d=[0, 500, 1000, 1000],
+                ),
+            ]
+        )
 
 
 def send(client: TestClient, guid: str, text: str, *, with_photo: bool = False) -> None:
@@ -156,6 +184,34 @@ def test_openai_identifier_falls_back_to_caption() -> None:
 
     assert identity.title == "Sony WH-1000XM5 headphones"
     assert identity.brand == "Sony"
+
+
+def test_openai_identifier_detects_all_sellable_objects() -> None:
+    import asyncio
+
+    calls: list[dict] = []
+    detection = InventoryDetection(
+        items=[InventoryItem(**IDENTITY.model_dump(), box_2d=[10, 20, 500, 600])]
+    )
+
+    class FakeResponses:
+        async def parse(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(output_parsed=detection)
+
+    identifier = OpenAIIdentifier(
+        "unused-test-key",
+        client=SimpleNamespace(responses=FakeResponses()),
+    )
+    result = asyncio.run(
+        identifier.detect_all(jpeg_bytes(), "image/jpeg", "sell everything here")
+    )
+
+    assert result.items[0].title == IDENTITY.title
+    assert result.items[0].box_2d == [10, 20, 500, 600]
+    assert calls[0]["text_format"] is InventoryDetection
+    assert calls[0]["store"] is False
+    assert "Inventory every distinct sellable item" in calls[0]["instructions"]
 
 
 def test_identify_then_confirm_then_enhance(tmp_path: Path) -> None:
@@ -270,6 +326,53 @@ def test_batch_creates_separate_items_and_accepts_numbered_correction(tmp_path: 
             assert [item.title for item in items] == [IDENTITY.title, "Bose QC45 headphones"]
             assert [len(item.photo_paths) for item in items] == [4, 2]
             assert all(len(item.constraints_json["batch_item_ids"]) == 2 for item in items)
+
+
+def test_one_inventory_photo_becomes_separate_confirmed_items(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    app = create_app(
+        make_settings(tmp_path),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+        identifier=FakeInventoryIdentifier(),
+    )
+    with TestClient(app) as client:
+        send(client, "inventory-1", "sell everything here by sunday", with_photo=True)
+        assert "I found 2 sellable items" in adapter.sent_texts[-1]
+        assert "1. Apple iPad Air" in adapter.sent_texts[-1]
+        assert "2. Sony WH-1000XM5" in adapter.sent_texts[-1]
+
+        send(client, "inventory-2", "yes")
+        assert len(adapter.sent_images) == 4
+        send(client, "inventory-3", "approve")
+
+        with Session(app.state.engine) as session:
+            items = session.exec(select(Item).order_by(Item.created_at)).all()
+            assert len(items) == 2
+            assert all(item.constraints_json["inventory_source_path"] for item in items)
+            assert all(len(item.photo_paths) == 2 for item in items)
+
+
+def test_inventory_checklist_can_remove_an_unwanted_item(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    app = create_app(
+        make_settings(tmp_path),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+        identifier=FakeInventoryIdentifier(),
+    )
+    with TestClient(app) as client:
+        send(client, "remove-1", "sell the things on this table", with_photo=True)
+        send(client, "remove-2", "remove 2")
+        assert "Removed." in adapter.sent_texts[-1]
+        assert "Sony" not in adapter.sent_texts[-1]
+        send(client, "remove-3", "yes")
+        assert len(adapter.sent_images) == 2
+
+        with Session(app.state.engine) as session:
+            items = session.exec(select(Item).order_by(Item.created_at)).all()
+            assert len(items) == 2
+            assert items[1].status.value == "cancelled"
 
 
 def test_openai_identifier_parses_and_normalizes(tmp_path: Path) -> None:

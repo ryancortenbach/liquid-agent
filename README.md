@@ -77,6 +77,11 @@ use counts such as `BATCH 2+3`, where the first two attachments are item 1 and t
 item 2. Liquid accepts corrections such as `2 is Bose QC45`, reviews the generated set together,
 and then walks through the listings one item at a time.
 
+A single photo containing several products is also treated as an inventory scene. Liquid detects
+and crops each sellable object, presents a numbered checklist, and creates one item per confirmed
+object. Reply `REMOVE 3` to exclude something that is not for sale, or rename it with `3 is ...`.
+The uncropped source image is retained for auditability.
+
 The eBay sandbox path is `POST /api/items/{item_id}/publish/ebay`. It creates a draft from approved
 photos first. The offer is published only when the request explicitly includes
 `"seller_approved": true`, and Liquid marks it live only after eBay returns a listing id.

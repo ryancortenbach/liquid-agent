@@ -45,6 +45,10 @@ the message with `BATCH` and attach one primary photo for each item. Use `BATCH 
 has two photos and item 2 has three. Confirm the numbered identity summary, approve the photo set,
 and Liquid will move through the items one at a time.
 
+If one photo contains several products, send it normally. Liquid inventories and crops each
+sellable object, then asks the seller to confirm a numbered checklist. Use `REMOVE 3` to exclude an
+object or `3 is ...` to correct its identity. Send a closer photo if the checklist missed anything.
+
 Keep a specific `SELLER_HANDLE` during local testing. Set it to `*` only when intentionally opening
 the bot to multiple sellers. Each sender receives a separate seller, conversation, item, and eBay
 connection record.

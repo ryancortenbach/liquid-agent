@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import mimetypes
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -12,14 +12,16 @@ from dateparser import parse as parse_date
 from sqlalchemy import Engine
 from sqlmodel import Session, select
 
-from app.channels.base import InboundMessage
+from app.channels.base import InboundAttachment, InboundMessage
 from app.channels.imessage_bluebubbles import BlueBubblesAdapter
 from app.clock import Clock
 from app.inbound.identify import (
     YES_WORDS,
     Identifier,
+    InventoryDetection,
     ItemIdentity,
     apply_identity,
+    crop_inventory_item,
     interpret_confirmation,
 )
 from app.ledger import write_decision
@@ -313,6 +315,15 @@ class SellerMessageRouter:
             )
             return
 
+        detector = getattr(self.identifier, "detect_all", None)
+        if (
+            len(attachments) == 1
+            and not BATCH_PATTERN.match(message.text.strip())
+            and callable(detector)
+        ):
+            await self._process_inventory_photo(message, attachments[0], detector)
+            return
+
         groups = batch_photo_groups(message.text, len(attachments))
         is_batch = len(groups) > 1
         with Session(self.engine) as session:
@@ -429,6 +440,114 @@ class SellerMessageRouter:
         ]
         await self._enhance_or_store_many(message, conversation_id, jobs)
 
+    async def _process_inventory_photo(
+        self,
+        message: InboundMessage,
+        attachment: InboundAttachment,
+        detector: Callable[[bytes, str, str], Awaitable[InventoryDetection]],
+    ) -> None:
+        """Split one scene into separately tracked items before any image editing."""
+        with Session(self.engine) as session:
+            conversation = self._get_or_create_conversation(session, message)
+            first = self._get_or_create_item(session, conversation, message.text)
+            conversation.status = ConversationStatus.PROCESSING_PHOTO
+            session.add(conversation)
+            session.commit()
+            conversation_id = conversation.id
+            first_item_id = first.id
+
+        mime_type = attachment.mime_type or mimetypes.guess_type(attachment.filename or "")[0]
+        try:
+            if mime_type is None:
+                raise PhotoPipelineError("photo media type is missing")
+            content = await self.adapter.download_attachment_bytes(attachment.guid)
+            detection = await detector(content, mime_type, message.text)
+            identities = list(detection.items)
+            if not identities:
+                raise PhotoPipelineError("no sellable items were detected")
+        except Exception:
+            await self._fail_photo(message, conversation_id)
+            return
+
+        with Session(self.engine) as session:
+            conversation = session.get(SellerConversation, conversation_id)
+            first = session.get(Item, first_item_id)
+            if conversation is None or first is None:
+                raise LookupError("item or conversation was lost")
+            items = [first]
+            for _ in identities[1:]:
+                items.append(
+                    self._get_or_create_item(
+                        session,
+                        conversation,
+                        message.text,
+                        force_new=True,
+                    )
+                )
+            item_ids = [item.id for item in items]
+            source_path = None
+            if len(items) > 1:
+                source_path = self.storage.save_original(
+                    f"_inventory_sources/{message.guid}", content, mime_type
+                ).relative_path
+            for index, (item, identity) in enumerate(zip(items, identities, strict=True)):
+                self._apply_identity(item, identity)
+                if len(items) > 1:
+                    crop = crop_inventory_item(content, identity.box_2d)
+                    pending = self.storage.save_original(
+                        f"_pending/{item.id}", crop, "image/jpeg"
+                    )
+                    pending_attachments = [
+                        {"file_path": pending.relative_path, "mime_type": "image/jpeg"}
+                    ]
+                else:
+                    pending_attachments = [{"guid": attachment.guid, "mime_type": mime_type}]
+                item.constraints_json = {
+                    **item.constraints_json,
+                    "pending_attachments": pending_attachments,
+                    "batch_item_ids": item_ids if len(items) > 1 else [],
+                    "batch_index": index,
+                    "inventory_source_path": source_path,
+                    "inventory_box_2d": identity.box_2d,
+                }
+                session.add(item)
+                write_decision(
+                    session,
+                    item_id=item.id,
+                    sim_at=self.clock.now(),
+                    wall_at=self.clock.wall(),
+                    kind="system",
+                    action="inventory_detect",
+                    inputs={
+                        "title": identity.title,
+                        "confidence": identity.confidence,
+                        "box_2d": identity.box_2d,
+                        "inventory_size": len(items),
+                    },
+                    reason="detected a distinct sellable object in the seller's inventory photo",
+                    price_before=None,
+                    price_after=None,
+                )
+            conversation.active_item_id = item_ids[0]
+            conversation.status = ConversationStatus.AWAITING_IDENTITY
+            conversation.updated_at = self.clock.now()
+            session.add(conversation)
+            session.commit()
+
+        if len(identities) == 1:
+            question = identities[0].question()
+        else:
+            summary = "\n".join(
+                f"{index}. {identity.title}"
+                for index, identity in enumerate(identities, start=1)
+            )
+            question = (
+                f"I found {len(identities)} sellable items in that photo:\n{summary}\n"
+                "Reply YES if that is everything. You can say 'REMOVE 3' or "
+                "'2 is Bose QC45'. If I missed something, send a closer photo of it."
+            )
+        await self.adapter.send_text(message.chat_guid, question, f"{message.guid}:inventory")
+
     @staticmethod
     def _apply_identity(item: Item, identity: ItemIdentity) -> None:
         caption_title = item.constraints_json.get("original_caption", "")
@@ -442,6 +561,12 @@ class SellerMessageRouter:
             item.condition = ConditionGrade(identity.condition_guess)
         item.confidence = identity.confidence
         item.constraints_json = apply_identity(item.constraints_json, identity)
+
+    async def _load_pending_attachment(self, pending: dict) -> bytes:
+        if pending.get("file_path"):
+            path = self.storage.resolve(pending["file_path"])
+            return await asyncio.to_thread(path.read_bytes)
+        return await self.adapter.download_attachment_bytes(pending["guid"])
 
     async def _confirm_identity(self, message: InboundMessage) -> bool:
         """Handle the reply to "is it this?"; returns True when the message was consumed."""
@@ -467,8 +592,50 @@ class SellerMessageRouter:
             lowered = message.text.strip().lower().rstrip(".! ")
 
             if len(batch_items) > 1 and lowered not in YES_WORDS:
+                removal = re.match(r"^(?:remove|skip)\s+([\d,\s]+)$", lowered)
                 correction = re.match(r"^(\d+)\s+(?:is|=)\s+(.+)$", message.text.strip())
-                if correction and 1 <= int(correction.group(1)) <= len(batch_items):
+                if removal:
+                    indexes = {
+                        int(value)
+                        for value in re.findall(r"\d+", removal.group(1))
+                        if 1 <= int(value) <= len(batch_items)
+                    }
+                    remaining = [
+                        value
+                        for index, value in enumerate(batch_items, start=1)
+                        if index not in indexes
+                    ]
+                    for index in indexes:
+                        removed = batch_items[index - 1]
+                        removed.status = ItemStatus.CANCELLED
+                        for pending in removed.constraints_json.get("pending_attachments") or []:
+                            if pending.get("file_path"):
+                                self.storage.resolve(pending["file_path"]).unlink(missing_ok=True)
+                        session.add(removed)
+                    remaining_ids = [value.id for value in remaining]
+                    for index, value in enumerate(remaining):
+                        value.constraints_json = {
+                            **value.constraints_json,
+                            "batch_item_ids": remaining_ids,
+                            "batch_index": index,
+                        }
+                        session.add(value)
+                    if remaining:
+                        conversation.active_item_id = remaining[0].id
+                        batch_items = remaining
+                        summary = "\n".join(
+                            f"{index}. {value.title}"
+                            for index, value in enumerate(remaining, start=1)
+                        )
+                        repeat_text = f"Removed.\n{summary}\nReply YES if that is everything."
+                    else:
+                        conversation.active_item_id = None
+                        conversation.status = ConversationStatus.READY
+                        batch_items = []
+                        repeat_text = (
+                            "Removed every item. Send another photo whenever you are ready."
+                        )
+                elif correction and 1 <= int(correction.group(1)) <= len(batch_items):
                     corrected = batch_items[int(correction.group(1)) - 1]
                     corrected.title = correction.group(2).strip()[:120]
                     corrected.confidence = 1.0
@@ -503,9 +670,13 @@ class SellerMessageRouter:
                     value.confidence = max(value.confidence, 0.95)
                     session.add(value)
             conversation.status = (
-                ConversationStatus.AWAITING_IDENTITY
-                if repeat_text is not None
-                else ConversationStatus.PROCESSING_PHOTO
+                ConversationStatus.READY
+                if repeat_text is not None and not batch_items
+                else (
+                    ConversationStatus.AWAITING_IDENTITY
+                    if repeat_text is not None
+                    else ConversationStatus.PROCESSING_PHOTO
+                )
             )
             conversation.updated_at = self.clock.now()
             session.add(conversation)
@@ -547,7 +718,7 @@ class SellerMessageRouter:
                 for pending in values
             ]
             contents = await asyncio.gather(
-                *(self.adapter.download_attachment_bytes(value["guid"]) for _, value in flattened)
+                *(self._load_pending_attachment(value) for _, value in flattened)
             )
             jobs = [
                 (item_id, content, pending.get("mime_type") or "image/jpeg")
@@ -556,7 +727,12 @@ class SellerMessageRouter:
         except Exception:
             await self._fail_photo(message, conversation_id)
             return True
-        await self._enhance_or_store_many(message, conversation_id, jobs)
+        try:
+            await self._enhance_or_store_many(message, conversation_id, jobs)
+        finally:
+            for _, pending in flattened:
+                if pending.get("file_path"):
+                    self.storage.resolve(pending["file_path"]).unlink(missing_ok=True)
         return True
 
     async def _fail_photo(self, message: InboundMessage, conversation_id: str) -> None:
