@@ -182,10 +182,11 @@ def apply_defaults(details: IntakeDetails) -> IntakeDetails:
 # (you decide / both / everywhere) and can be changed in any reply, e.g. "not under 200".
 QUESTION_SETS: dict[str, str] = {
     "condition": (
-        "condition? 1 like new · 2 good · 3 fair · 4 broken\n"
-        "anything included or wrong with it?"
+        "How would you describe the condition?\n"
+        "1 like new · 2 good · 3 fair · 4 broken\n"
+        "Anything included or wrong with it?"
     ),
-    "plan": "how fast do you want it gone? 1 day · 3 days · week · month",
+    "plan": "How fast would you like it gone? 1 day · 3 days · week · month",
 }
 
 

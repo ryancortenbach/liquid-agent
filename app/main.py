@@ -487,7 +487,7 @@ def create_app(
                     if adapter is not None and conversation is not None:
                         await adapter.send_text(
                             conversation.chat_guid,
-                            "ebay didn't connect. reply retry for a new link.",
+                            "No problem, eBay didn't connect. Reply RETRY for a fresh link.",
                             f"ebay-declined:{seller_id}:{state[-16:]}",
                         )
             return HTMLResponse(
@@ -512,7 +512,7 @@ def create_app(
             if adapter is not None and conversation is not None:
                 await adapter.send_text(
                     conversation.chat_guid,
-                    "ebay connect failed. reply retry for a new link.",
+                    "Sorry, eBay connect didn't go through. Reply RETRY for a fresh link.",
                     f"ebay-failed:{seller_id}:{state[-16:]}",
                 )
             return HTMLResponse(
@@ -537,7 +537,7 @@ def create_app(
         if adapter is not None and chat_guid is not None:
             await adapter.send_text(
                 chat_guid,
-                "ebay connected. send a photo, or text connect email for alerts.",
+                "You're connected to eBay. Send me a photo, or text CONNECT EMAIL for alerts.",
                 f"ebay-connected:{connection.id}:{connection.updated_at.isoformat()}",
             )
         return HTMLResponse(
@@ -578,8 +578,8 @@ def create_app(
             await adapter.send_text(
                 conversation.chat_guid,
                 (
-                    f"Gmail connected to {connection.email_address}. I will alert you here and "
-                    "by email when I detect an offer or sale, and I will email live listing links."
+                    f"You're connected to Gmail at {connection.email_address}. I'll alert you "
+                    "here and by email when I find an offer or sale."
                 ),
                 f"gmail-connected:{connection.id}:{connection.updated_at.isoformat()}",
             )

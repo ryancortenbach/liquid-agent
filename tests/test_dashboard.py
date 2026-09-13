@@ -37,7 +37,7 @@ def test_dashboard_lists_items_and_shows_plan(tmp_path: Path) -> None:
         client.post(f"/api/items/{item_id}/plan-listing", json={"research": True})
         page = client.get(f"/dashboard/{item_id}")
         assert page.status_code == 200
-        assert "here&#39;s the plan" in page.text or "here's the plan" in page.text
+        assert "Here&#39;s the plan" in page.text or "Here's the plan" in page.text
         assert "offline sample" in page.text
         assert "price_plan" in page.text and "research" in page.text
         assert "facebook" in page.text and "offerup" in page.text

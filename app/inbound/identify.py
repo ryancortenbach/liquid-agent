@@ -40,14 +40,14 @@ class ItemIdentity(BaseModel):
 
     def question(self) -> str:
         """One line when confident; lookalike hints only when the model is unsure."""
-        text = f"this the {self.title}? (yes, or tell me what it is)"
+        text = f"Does this look like the {self.title}? (Yes, or tell me what it is.)"
         if self.confidence >= 0.8:
             return text
         if self.lookalike_note:
             text += f"\n{self.lookalike_note}"
         alternatives = [c.title for c in self.candidates if c.title != self.title][:2]
         if alternatives:
-            text += "\nor: " + " · ".join(f"{i + 2}) {t}" for i, t in enumerate(alternatives))
+            text += "\nOr: " + " · ".join(f"{i + 2}) {t}" for i, t in enumerate(alternatives))
         return text
 
 
