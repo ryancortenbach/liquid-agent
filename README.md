@@ -94,13 +94,17 @@ tunnel is required. Details in `docs/08-setup.md`.
 
 At any point in Messages, `STATUS` reports progress, `RESUME` repeats the next step, `BACK`
 explains how to revise the current step, and `START OVER` cancels the active draft safely.
+With `OPENAI_CHAT_ENABLED=true`, a structured intent layer uses the saved workflow state and recent
+seller messages to understand conversational requests and references. The deterministic workflow
+still owns onboarding, photo approval, listing approval, and publishing. Each seller's messages are
+processed serially so delayed BlueBubbles deliveries cannot trigger duplicate replies.
 
 For per-seller OAuth, configure the eBay application credentials, RuName, `APP_SECRET`, and a
-public `PUBLIC_BASE_URL`. When that is the only way to publish, a seller is placed into eBay
-onboarding on their first text and Liquid processes nothing until they approve access. Liquid
-stores only an encrypted refresh token for that seller and resolves their connection when
-publishing; the link expires after 10 minutes, and `RETRY` issues a fresh one. When a sandbox
-refresh token is present in `.env`, that publisher serves every seller and onboarding is skipped.
+public `PUBLIC_BASE_URL`. Every seller is placed into eBay onboarding on their first text, and
+Liquid processes nothing until they approve access. Liquid stores only an encrypted refresh token
+for that seller and resolves their connection when publishing. The link expires after 10 minutes,
+and `RETRY` issues a fresh one. A shared sandbox refresh token can verify the developer setup, but
+it never bypasses seller onboarding.
 
 ## Submission
 

@@ -116,6 +116,16 @@ class SellerConversation(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
+class ConversationTurn(SQLModel, table=True):
+    id: str = Field(default_factory=new_id, primary_key=True)
+    seller_id: str = Field(foreign_key="seller.id", index=True)
+    source_event_id: str | None = Field(default=None, index=True, unique=True)
+    role: str
+    text: str
+    intent: str | None = None
+    created_at: datetime = Field(default_factory=utc_now, index=True)
+
+
 class Item(SQLModel, table=True):
     id: str = Field(default_factory=new_id, primary_key=True)
     seller_id: str = Field(foreign_key="seller.id", index=True)
@@ -263,6 +273,13 @@ class WebhookReceipt(SQLModel, table=True):
     provider: str = Field(primary_key=True)
     event_id: str = Field(primary_key=True)
     received_at: datetime = Field(default_factory=utc_now)
+
+
+class InboundFingerprint(SQLModel, table=True):
+    provider: str = Field(primary_key=True)
+    fingerprint: str = Field(primary_key=True)
+    event_id: str = Field(index=True)
+    received_at: datetime = Field(default_factory=utc_now, index=True)
 
 
 class DemandObs(SQLModel, table=True):

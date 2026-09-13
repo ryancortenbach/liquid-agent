@@ -28,6 +28,7 @@ from app.ledger import write_decision
 from app.models import (
     ConditionGrade,
     ConversationStatus,
+    ConversationTurn,
     EbayConnection,
     Item,
     ItemStatus,
@@ -184,6 +185,73 @@ class SellerMessageRouter:
 
     def accepts(self, message: InboundMessage) -> bool:
         return self.seller_handle is None or canonical_handle(message.handle) == self.seller_handle
+
+    def remember_turn(
+        self,
+        message: InboundMessage,
+        *,
+        role: str,
+        text: str,
+        intent: str | None = None,
+    ) -> None:
+        if not text.strip():
+            return
+        with Session(self.engine) as session:
+            conversation = self._get_or_create_conversation(session, message)
+            source_event_id = message.guid if role == "user" else f"{message.guid}:{role}"
+            existing = session.exec(
+                select(ConversationTurn).where(
+                    ConversationTurn.source_event_id == source_event_id
+                )
+            ).first()
+            if existing is not None:
+                return
+            session.add(
+                ConversationTurn(
+                    seller_id=conversation.seller_id,
+                    source_event_id=source_event_id,
+                    role=role,
+                    text=text.strip()[:2000],
+                    intent=intent,
+                    created_at=self.clock.now(),
+                )
+            )
+            session.commit()
+
+    def chat_context(self, handle: str) -> dict:
+        with Session(self.engine) as session:
+            conversation = session.exec(
+                select(SellerConversation).where(SellerConversation.handle == handle)
+            ).first()
+            if conversation is None:
+                return {"conversation_status": "new", "recent_messages": []}
+            item = (
+                session.get(Item, conversation.active_item_id)
+                if conversation.active_item_id
+                else None
+            )
+            turns = session.exec(
+                select(ConversationTurn)
+                .where(ConversationTurn.seller_id == conversation.seller_id)
+                .order_by(ConversationTurn.created_at.desc())  # type: ignore[attr-defined]
+                .limit(8)
+            ).all()
+            return {
+                "conversation_status": conversation.status.value,
+                "active_item": (
+                    {
+                        "title": item.title,
+                        "status": item.status.value,
+                        "known_details": item.constraints_json.get("intake") or {},
+                    }
+                    if item is not None
+                    else None
+                ),
+                "recent_messages": [
+                    {"role": turn.role, "text": turn.text, "intent": turn.intent}
+                    for turn in reversed(turns)
+                ],
+            }
 
     async def route(self, message: InboundMessage) -> None:
         if not self.accepts(message):

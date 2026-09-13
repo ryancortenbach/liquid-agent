@@ -16,11 +16,13 @@ uv run pytest
 4. Keep `OPENAI_VISION_MODEL=gpt-5.4-mini` to identify the product before editing it.
 5. Keep `OPENAI_TRUTH_CHECK=true` so generated photos are compared with their originals before
    seller review.
-6. Complete API organization verification if the OpenAI console requires it for image models.
-7. Start the app and open `http://localhost:8000/docs`.
-8. Create an item with `POST /api/items`.
-9. Send an iPhone HEIC, JPEG, PNG, or WebP to `POST /api/items/{item_id}/photos/enhance`.
-10. Compare both returned image URLs, then call the review endpoint with `{"approved": true}`.
+6. Keep `OPENAI_CHAT_ENABLED=true` and `OPENAI_CHAT_MODEL=gpt-5.4-mini` for conversational
+   iMessage intent handling. API response storage is disabled for these calls.
+7. Complete API organization verification if the OpenAI console requires it for image models.
+8. Start the app and open `http://localhost:8000/docs`.
+9. Create an item with `POST /api/items`.
+10. Send an iPhone HEIC, JPEG, PNG, or WebP to `POST /api/items/{item_id}/photos/enhance`.
+11. Compare both returned image URLs, then call the review endpoint with `{"approved": true}`.
 
 The generated image must pass the automated truth check and then remains in `review` until the
 seller approves it. The original is always kept.
@@ -71,7 +73,8 @@ uv run python scripts/ebay_authorize.py
 
 Sign in as the sandbox test user, approve, and paste the URL you land on. No public callback is
 needed: the script exchanges the `code` from that URL and writes `EBAY_SB_REFRESH_TOKEN` to
-`.env`. The app's publisher uses that token for every seller.
+`.env`. This shared token supports developer verification and API-only tests. It does not bypass
+the required per-seller iMessage onboarding flow.
 
 ```bash
 uv run python scripts/ebay_setup.py
@@ -97,10 +100,9 @@ fetches them from `/api/photos/{id}/file` instead.
 Category: an explicit `category_id`, else a live Taxonomy suggestion for the title (production
 keyset), else `EBAY_SB_DEFAULT_CATEGORY_ID`, else a leaf category for the identifier's item kind.
 
-Per-seller connections (`CONNECT EBAY` in iMessage, `/oauth/ebay/callback`) still work when
-`APP_SECRET` and the RuName are set and `PUBLIC_BASE_URL` is public; a seller's own connection
-takes precedence over the `.env` token. `REQUIRE_EBAY_ONBOARDING` gates intake only when a
-per-seller connection is the sole way to publish.
+Per-seller connections (`CONNECT EBAY` in iMessage, `/oauth/ebay/callback`) require `APP_SECRET`,
+the RuName, and a public `PUBLIC_BASE_URL`. Each seller's own connection is required before intake
+and takes precedence over the `.env` token. Keep `REQUIRE_EBAY_ONBOARDING=true`.
 
 API path: `POST /api/items/{item_id}/publish/ebay` with
 `{"seller_approved": false, "aspects": {"Brand": ["Sony"]}}` prepares a draft; repeat with

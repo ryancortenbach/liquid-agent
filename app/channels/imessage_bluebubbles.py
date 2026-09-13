@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -8,6 +10,22 @@ from uuid import uuid4
 import httpx
 
 from app.channels.base import InboundAttachment, InboundMessage
+
+
+def inbound_fingerprint(message: InboundMessage) -> str:
+    """Identify one visible message even if BlueBubbles emits more than one GUID for it."""
+    payload = {
+        "handle": message.handle.strip().lower(),
+        "chat_guid": message.chat_guid,
+        "text": " ".join(message.text.split()),
+        "created_second": int(message.created_at.timestamp()),
+        "attachments": sorted(
+            ((value.mime_type or "").lower(), (value.filename or "").lower())
+            for value in message.attachments
+        ),
+    }
+    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 class BlueBubblesAdapter:
