@@ -84,6 +84,25 @@ def canonical_handle(value: str) -> str:
     return f"+{digits}" if stripped.startswith("+") else digits
 
 
+WILDCARD_ALLOWLIST = frozenset({"*"})
+
+
+def parse_handle_allowlist(value: str | None) -> frozenset[str]:
+    """Turn a SELLER_HANDLE setting into the set of handles allowed to reach Liquid.
+
+    Accepts one handle or several separated by commas. A blank or missing value
+    returns an empty set, which callers must treat as "refuse everyone" rather
+    than "allow everyone". Only a bare "*" opens Liquid to any sender.
+    """
+    entries = [entry.strip() for entry in (value or "").split(",")]
+    entries = [entry for entry in entries if entry]
+    if not entries:
+        return frozenset()
+    if "*" in entries:
+        return WILDCARD_ALLOWLIST
+    return frozenset(canonical_handle(entry) for entry in entries)
+
+
 def parse_floor_cents(text: str) -> int:
     patterns = (
         r"(?:minimum|min|floor)\s*(?:price\s*)?(?:is\s*)?\$?([0-9]+(?:\.[0-9]{1,2})?)",
@@ -178,9 +197,7 @@ class SellerMessageRouter:
         self.adapter = adapter
         self.editor = editor
         self.storage = storage
-        self.seller_handle = (
-            None if seller_handle.strip() == "*" else canonical_handle(seller_handle)
-        )
+        self.allowed_handles = parse_handle_allowlist(seller_handle)
         self.timezone = timezone
         self.ebay_authorization_url = ebay_authorization_url
         self.email_authorization_url = email_authorization_url
@@ -190,7 +207,16 @@ class SellerMessageRouter:
         self.reviewer = reviewer
 
     def accepts(self, message: InboundMessage) -> bool:
-        return self.seller_handle is None or canonical_handle(message.handle) == self.seller_handle
+        """Only handles on the allowlist may reach Liquid.
+
+        An empty allowlist refuses everyone. Opening Liquid to any sender takes
+        the explicit "*" wildcard, never a blank or missing setting.
+        """
+        if self.allowed_handles == WILDCARD_ALLOWLIST:
+            return True
+        if not self.allowed_handles:
+            return False
+        return canonical_handle(message.handle) in self.allowed_handles
 
     def remember_turn(
         self,
