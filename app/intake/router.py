@@ -2,11 +2,38 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+from sqlmodel import Session, select
+
 from app.channels.base import InboundMessage
 from app.channels.chat_ai import ChatIntent, ChatInterpreter
 from app.channels.seller_router import SellerMessageRouter
+from app.intake.details import QUESTION_SETS
 from app.intake.flow import ListingFlow
 from app.intake.item_guard import extract_separate_item_requests, separate_items_reply
+from app.models import ConversationStatus, Item, SellerConversation
+
+SMALL_TALK = {
+    "hi",
+    "hii",
+    "hiii",
+    "hey",
+    "yo",
+    "hello",
+    "sup",
+    "what's up",
+    "whats up",
+    "hey there",
+    "hi there",
+    "hello there",
+    "howdy",
+    "hiya",
+}
+
+
+def is_small_talk(text: str) -> bool:
+    """A greeting sent mid-listing, which must not derail the question in flight."""
+    return text.strip().strip("!?.,").lower() in SMALL_TALK
+
 
 DIRECT_TEXT = {
     "approve",
@@ -97,6 +124,26 @@ class PipelineRouter:
         )
         return True
 
+    def pending_question(self, handle: str) -> str | None:
+        """The intake question this seller was last asked, if one is outstanding."""
+        with Session(self.base.engine) as session:
+            conversation = session.exec(
+                select(SellerConversation).where(SellerConversation.handle == handle)
+            ).first()
+            if (
+                conversation is None
+                or conversation.status != ConversationStatus.AWAITING_DETAILS
+                or conversation.active_item_id is None
+            ):
+                return None
+            item = session.get(Item, conversation.active_item_id)
+            if item is None:
+                return None
+            asked = list(item.constraints_json.get("intake_asked") or [])
+        if not asked:
+            return None
+        return QUESTION_SETS.get(asked[-1])
+
     async def route(self, message: InboundMessage) -> None:
         if not self.accepts(message):
             return
@@ -118,6 +165,20 @@ class PipelineRouter:
                 role="assistant",
                 text=reply,
                 intent="separate_items",
+            )
+            return
+        pending = self.pending_question(message.handle)
+        if pending and not message.attachments and is_small_talk(message.text):
+            await self.base.adapter.send_text(
+                message.chat_guid,
+                pending,
+                f"{message.guid}:repeat-question",
+            )
+            self.base.remember_turn(
+                message,
+                role="assistant",
+                text=pending,
+                intent="repeat_question",
             )
             return
         if (
