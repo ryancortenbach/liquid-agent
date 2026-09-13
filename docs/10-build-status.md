@@ -13,6 +13,8 @@ Updated 2026-09-13.
 - Mandatory seller review before an enhanced image can join the listing image set
 - Automated original-versus-generated truth check that blocks changed products or hidden defects
 - Authenticated BlueBubbles webhook with sender allowlisting and event deduplication
+- Per-seller message serialization and content fingerprints for delayed or duplicated events
+- OpenAI structured chat intents with local conversation memory and deterministic safety gates
 - Complete iMessage photo intake, OpenAI product identification, enhancement preview, approval,
   rejection, and status flow
 - Multi-angle photo groups for one item and multi-item batch intake with numbered corrections
@@ -23,7 +25,7 @@ Updated 2026-09-13.
 - SQLite sale claims that pause duplicates and support confirmed or failed marketplace closes
 - Deadline pricing engine, guard, ledger, outbox, simulation, and evaluation artifacts
 - FastAPI item, photo enhancement, photo review, file, planning, tick, and ledger endpoints
-- 88 passing unit, API, property, clock, simulation, sale-claim, photo, iMessage, and eBay tests
+- 93 passing unit, API, property, clock, simulation, sale-claim, photo, iMessage, and eBay tests
 
 ## Ordered P0 queue
 

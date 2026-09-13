@@ -88,6 +88,10 @@ photos first. The offer is published only when the request explicitly includes
 
 At any point in Messages, `STATUS` reports progress, `RESUME` repeats the next step, `BACK`
 explains how to revise the current step, and `START OVER` cancels the active draft safely.
+With `OPENAI_CHAT_ENABLED=true`, a structured intent layer uses the saved workflow state and recent
+seller messages to understand conversational requests and references. The deterministic workflow
+still owns onboarding, photo approval, listing approval, and publishing. Each seller's messages are
+processed serially so delayed BlueBubbles deliveries cannot trigger duplicate replies.
 
 For seller OAuth, configure the eBay application credentials, RuName, and `APP_SECRET`. A seller
 is automatically placed into eBay onboarding on their first text. Until they sign in on eBay and

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from io import BytesIO
 from pathlib import Path
 
@@ -7,11 +8,13 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from sqlmodel import Session, select
 
+from app.channels.chat_ai import ChatIntent, ChatInterpretation
 from app.channels.imessage_bluebubbles import BlueBubblesAdapter
 from app.config import Mode, Settings
 from app.main import create_app
 from app.models import (
     ConversationStatus,
+    ConversationTurn,
     EbayConnection,
     Item,
     ItemStatus,
@@ -120,6 +123,31 @@ class FakeEbayConnectionService:
         return None
 
 
+class FakeChatInterpreter:
+    def __init__(self, result: ChatInterpretation) -> None:
+        self.result = result
+        self.contexts: list[dict] = []
+
+    async def interpret(self, *, handle: str, text: str, context: dict) -> ChatInterpretation:
+        assert handle == "+14155550123"
+        assert text
+        self.contexts.append(context)
+        return self.result
+
+
+class SlowChatInterpreter:
+    def __init__(self) -> None:
+        self.active = 0
+        self.max_active = 0
+
+    async def interpret(self, *, handle: str, text: str, context: dict) -> ChatInterpretation:
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        await asyncio.sleep(0.03)
+        self.active -= 1
+        return ChatInterpretation(intent=ChatIntent.REPLY, reply=f"Understood: {text}")
+
+
 def test_imessage_photo_preview_approval_and_deduplication(tmp_path: Path) -> None:
     adapter = FakeMessageAdapter()
     app = create_app(
@@ -165,6 +193,21 @@ def test_imessage_photo_preview_approval_and_deduplication(tmp_path: Path) -> No
             json=intake,
         )
         assert duplicate.json()["status"] == "duplicate"
+        assert len(adapter.sent_images) == 2
+
+        same_content = message_payload(
+            guid="message-duplicate-guid",
+            text="Sony WH-1000XM5 headphones by Sunday 6pm, do not go under $170",
+            with_photo=True,
+        )
+        duplicate = client.post(
+            "/webhooks/bluebubbles?secret=webhook-secret",
+            json=same_content,
+        )
+        assert duplicate.json() == {
+            "status": "duplicate",
+            "reason": "same_message_content",
+        }
         assert len(adapter.sent_images) == 2
 
         approval = client.post(
@@ -409,3 +452,125 @@ def test_start_over_cancels_active_draft_and_resets_conversation(tmp_path: Path)
             conversation = session.exec(select(SellerConversation)).one()
             assert conversation.status == ConversationStatus.READY
             assert conversation.active_item_id is None
+
+
+def test_ai_chat_uses_workflow_context_and_sends_one_reply(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    interpreter = FakeChatInterpreter(
+        ChatInterpretation(
+            intent=ChatIntent.REPLY,
+            reply="Send a product photo, and I will help identify and list it.",
+        )
+    )
+    app = create_app(
+        Settings(
+            mode=Mode.SIM,
+            database_url="sqlite:///:memory:",
+            photo_storage_dir=str(tmp_path),
+            bb_webhook_secret="webhook-secret",
+            seller_handle="+14155550123",
+            require_ebay_onboarding=False,
+            openai_api_key=None,
+        ),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+        chat_interpreter=interpreter,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/webhooks/bluebubbles?secret=webhook-secret",
+            json=message_payload(guid="ai-1", text="What do I do with this thing?"),
+        )
+        assert response.json()["status"] == "queued"
+        assert adapter.sent_texts == [
+            "Send a product photo, and I will help identify and list it."
+        ]
+        assert interpreter.contexts[0]["conversation_status"] == "ready"
+        assert interpreter.contexts[0]["recent_messages"][-1]["text"] == (
+            "What do I do with this thing?"
+        )
+        with Session(app.state.engine) as session:
+            turns = session.exec(
+                select(ConversationTurn).order_by(ConversationTurn.created_at)
+            ).all()
+            assert [turn.role for turn in turns] == ["user", "assistant"]
+
+
+def test_messages_from_one_seller_are_processed_serially(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    interpreter = SlowChatInterpreter()
+    app = create_app(
+        Settings(
+            mode=Mode.SIM,
+            database_url="sqlite:///:memory:",
+            photo_storage_dir=str(tmp_path),
+            bb_webhook_secret="webhook-secret",
+            seller_handle="+14155550123",
+            require_ebay_onboarding=False,
+            openai_api_key=None,
+        ),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+        chat_interpreter=interpreter,
+    )
+
+    with TestClient(app):
+        first = adapter.parse_inbound(message_payload(guid="serial-1", text="first note"))
+        second = adapter.parse_inbound(message_payload(guid="serial-2", text="second note"))
+        assert first is not None and second is not None
+
+        async def run_both() -> None:
+            await asyncio.gather(
+                app.state.process_bluebubbles_message(first),
+                app.state.process_bluebubbles_message(second),
+            )
+
+        asyncio.run(run_both())
+
+    assert interpreter.max_active == 1
+    assert adapter.sent_texts == ["Understood: first note", "Understood: second note"]
+
+
+def test_ai_status_intent_does_not_get_consumed_as_listing_details(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    interpreter = FakeChatInterpreter(ChatInterpretation(intent=ChatIntent.STATUS))
+    app = create_app(
+        Settings(
+            mode=Mode.SIM,
+            database_url="sqlite:///:memory:",
+            photo_storage_dir=str(tmp_path),
+            bb_webhook_secret="webhook-secret",
+            seller_handle="+14155550123",
+            require_ebay_onboarding=False,
+            openai_api_key=None,
+        ),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+        chat_interpreter=interpreter,
+    )
+
+    with TestClient(app) as client:
+        client.post(
+            "/webhooks/bluebubbles?secret=webhook-secret",
+            json=message_payload(
+                guid="ai-status-1",
+                text="Sony WH-1000XM5 headphones",
+                with_photo=True,
+            ),
+        )
+        client.post(
+            "/webhooks/bluebubbles?secret=webhook-secret",
+            json=message_payload(guid="ai-status-2", text="approve"),
+        )
+        client.post(
+            "/webhooks/bluebubbles?secret=webhook-secret",
+            json=message_payload(guid="ai-status-3", text="Where are we with that?"),
+        )
+
+        assert "Current step: awaiting_details" in adapter.sent_texts[-1]
+        with Session(app.state.engine) as session:
+            conversation = session.exec(select(SellerConversation)).one()
+            item = session.exec(select(Item)).one()
+            assert conversation.status == ConversationStatus.AWAITING_DETAILS
+            assert item.constraints_json["intake_asked"] == ["condition"]

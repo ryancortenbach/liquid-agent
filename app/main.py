@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import secrets
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Annotated
@@ -19,10 +21,12 @@ from fastapi import (
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import Engine
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.channels.imessage_bluebubbles import BlueBubblesAdapter
-from app.channels.seller_router import SellerMessageRouter
+from app.channels.chat_ai import ChatInterpreter, OpenAIChatInterpreter
+from app.channels.imessage_bluebubbles import BlueBubblesAdapter, inbound_fingerprint
+from app.channels.seller_router import SellerMessageRouter, canonical_handle
 from app.clock import Clock, DemoClock, RealClock, SimClock, utc_now
 from app.config import Mode, Settings, get_settings
 from app.db import ItemLocks, create_db_and_tables, make_engine
@@ -49,6 +53,7 @@ from app.market.fees import instant_quote_cents
 from app.market.publish_service import EbayPublishError
 from app.models import (
     ConversationStatus,
+    InboundFingerprint,
     Item,
     ItemStatus,
     LedgerEvent,
@@ -79,6 +84,8 @@ from app.pricing.loop import reprice_loop
 from app.pricing.repricer import reprice_item
 from app.research.factory import build_comps_sources
 from app.web.dashboard import router as dashboard_router
+
+log = logging.getLogger(__name__)
 
 
 class PlanRequest(BaseModel):
@@ -188,6 +195,7 @@ def create_app(
     message_adapter: BlueBubblesAdapter | None = None,
     ebay_publisher: EbayPublisher | None = None,
     ebay_connection_service: EbayConnectionService | None = None,
+    chat_interpreter: ChatInterpreter | None = None,
     identifier: Identifier | None = None,
     photo_reviewer: PhotoTruthReviewer | None = None,
 ) -> FastAPI:
@@ -199,6 +207,7 @@ def create_app(
         create_db_and_tables(app.state.engine)
         app.state.clock = build_clock(app_settings)
         app.state.item_locks = ItemLocks()
+        app.state.message_locks = defaultdict(asyncio.Lock)
         app.state.photo_storage = PhotoStorage(app_settings.photo_storage_dir)
         app.state.photo_editor = photo_editor
         if app.state.photo_editor is None and app_settings.openai_api_key:
@@ -267,6 +276,16 @@ def create_app(
                 app.state.identifier = ClaudeIdentifier(
                     app_settings.anthropic_api_key, model=app_settings.claude_model
                 )
+        app.state.chat_interpreter = chat_interpreter
+        if (
+            app.state.chat_interpreter is None
+            and app_settings.openai_api_key
+            and app_settings.openai_chat_enabled
+        ):
+            app.state.chat_interpreter = OpenAIChatInterpreter(
+                app_settings.openai_api_key,
+                model=app_settings.openai_chat_model,
+            )
         app.state.seller_router = None
         if app.state.message_adapter is not None and app_settings.seller_handle:
             app.state.seller_router = SellerMessageRouter(
@@ -329,7 +348,9 @@ def create_app(
         )
         if app.state.seller_router is not None:
             app.state.seller_router = PipelineRouter(
-                app.state.seller_router, app.state.listing_flow
+                app.state.seller_router,
+                app.state.listing_flow,
+                app.state.chat_interpreter,
             )
         app.state.reprice_stop = asyncio.Event()
         app.state.reprice_task = None
@@ -450,13 +471,23 @@ def create_app(
     async def process_bluebubbles_message(message) -> None:
         router: SellerMessageRouter = app.state.seller_router
         try:
-            await router.route(message)
-        except Exception:
+            async with app.state.message_locks[canonical_handle(message.handle)]:
+                await router.route(message)
+        except Exception as exc:
+            log.exception("BlueBubbles message processing failed: %s", exc)
             with Session(app.state.engine) as session:
                 receipt = session.get(WebhookReceipt, ("bluebubbles", message.guid))
                 if receipt is not None:
                     session.delete(receipt)
-                    session.commit()
+                fingerprint = session.get(
+                    InboundFingerprint,
+                    ("bluebubbles", inbound_fingerprint(message)),
+                )
+                if fingerprint is not None:
+                    session.delete(fingerprint)
+                session.commit()
+
+    app.state.process_bluebubbles_message = process_bluebubbles_message
 
     @app.post("/webhooks/bluebubbles", status_code=202)
     async def bluebubbles_webhook(
@@ -488,8 +519,23 @@ def create_app(
             existing = session.get(WebhookReceipt, ("bluebubbles", message.guid))
             if existing is not None:
                 return {"status": "duplicate"}
+            fingerprint = inbound_fingerprint(message)
+            duplicate_content = session.get(InboundFingerprint, ("bluebubbles", fingerprint))
+            if duplicate_content is not None:
+                return {"status": "duplicate", "reason": "same_message_content"}
             session.add(WebhookReceipt(provider="bluebubbles", event_id=message.guid))
-            session.commit()
+            session.add(
+                InboundFingerprint(
+                    provider="bluebubbles",
+                    fingerprint=fingerprint,
+                    event_id=message.guid,
+                )
+            )
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                return {"status": "duplicate", "reason": "same_message_content"}
         background_tasks.add_task(process_bluebubbles_message, message)
         return {"status": "queued"}
 
