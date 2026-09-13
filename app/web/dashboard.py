@@ -33,6 +33,33 @@ def dollars(cents: int | None) -> str:
 
 templates.env.filters["dollars"] = dollars
 
+CONDITION_LABELS = {
+    "NEW": "New",
+    "LIKE_NEW": "Used, like new",
+    "USED_EXCELLENT": "Used, excellent",
+    "USED_VERY_GOOD": "Used, very good",
+    "USED_GOOD": "Used, good",
+    "USED_ACCEPTABLE": "Used, acceptable",
+    "FOR_PARTS_OR_NOT_WORKING": "For parts or not working",
+}
+
+SHIPPING_LABELS = {
+    "both": "Ships within one business day, or local pickup",
+    "ship": "Ships within one business day",
+    "pickup": "Local pickup only",
+}
+
+
+def condition_label(code: str | None) -> str:
+    """Marketplace condition codes read badly on a page; show the buyer-facing phrase."""
+    if not code:
+        return "Used"
+    return CONDITION_LABELS.get(code.upper(), code.replace("_", " ").capitalize())
+
+
+def shipping_label(choice: str | None) -> str:
+    return SHIPPING_LABELS.get((choice or "both").lower(), SHIPPING_LABELS["both"])
+
 
 @router.get("/dashboard", response_class=HTMLResponse)
 def dashboard_index(request: Request) -> HTMLResponse:
@@ -121,7 +148,7 @@ def demo_ebay_listing(listing_id: str, request: Request) -> HTMLResponse:
         item = session.get(Item, pack.item_id)
         if item is None:
             raise HTTPException(status_code=404, detail="item not found")
-        photos = session.exec(
+        enhanced = session.exec(
             select(ProductPhoto)
             .where(
                 ProductPhoto.item_id == item.id,
@@ -129,6 +156,19 @@ def demo_ebay_listing(listing_id: str, request: Request) -> HTMLResponse:
             )
             .order_by(ProductPhoto.created_at)
         ).all()
+        originals = session.exec(
+            select(ProductPhoto)
+            .where(
+                ProductPhoto.item_id == item.id,
+                ProductPhoto.role == PhotoRole.ORIGINAL,
+            )
+            .order_by(ProductPhoto.created_at)
+        ).all()
+        # Seller-approved enhanced photos lead; the untouched originals always follow, so
+        # the listing keeps the promise its description makes. A seller who withdrew
+        # approval simply gets their originals.
+        photos = [*enhanced, *originals]
+        intake = (item.constraints_json or {}).get("intake") or {}
         return templates.TemplateResponse(
             request,
             "demo_ebay.html",
@@ -136,6 +176,10 @@ def demo_ebay_listing(listing_id: str, request: Request) -> HTMLResponse:
                 "item": item,
                 "pack": pack,
                 "photos": photos,
+                "enhanced_ids": {photo.id for photo in enhanced},
+                "condition_label": condition_label(pack.condition),
+                "shipping_label": shipping_label(intake.get("shipping")),
+                "deadline": item.deadline_at,
                 "clock": request.app.state.clock.now(),
             },
         )

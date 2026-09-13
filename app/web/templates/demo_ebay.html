@@ -5,42 +5,126 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{ pack.title }} | Liquid demo listing</title>
 <style>
-  :root { --ink:#171717; --muted:#606060; --line:#d9d9d9; --blue:#3665f3; --soft:#f7f7f7; }
+  :root { --ink:#111; --muted:#666; --line:#ddd; --soft:#f5f5f5; }
   * { box-sizing:border-box; }
-  body { margin:0; color:var(--ink); background:#fff; font:16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-  .notice { background:#fff3cd; border-bottom:1px solid #e6cf76; padding:10px 20px; text-align:center; font-weight:650; }
-  header { max-width:1180px; margin:auto; padding:22px 24px; border-bottom:1px solid var(--line); font-size:24px; font-weight:800; }
-  header span { color:var(--blue); }
-  main { max-width:1180px; margin:36px auto; padding:0 24px; display:grid; grid-template-columns:minmax(0,1.2fr) minmax(320px,.8fr); gap:42px; }
-  .gallery { background:var(--soft); border-radius:18px; min-height:520px; display:grid; place-items:center; overflow:hidden; }
-  .gallery img { width:100%; height:100%; max-height:680px; object-fit:contain; }
-  h1 { font-size:28px; line-height:1.2; margin:0 0 18px; }
-  .condition { color:var(--muted); border-bottom:1px solid var(--line); padding-bottom:18px; }
-  .price { font-size:34px; font-weight:750; margin:22px 0; }
-  .button { display:block; color:#fff; background:var(--blue); border-radius:24px; padding:13px 18px; text-align:center; font-weight:700; }
-  .card { border:1px solid var(--line); border-radius:16px; padding:22px; margin-top:20px; }
-  .card h2 { font-size:18px; margin:0 0 12px; }
-  .card p { white-space:pre-wrap; }
-  dl { display:grid; grid-template-columns:auto 1fr; gap:8px 18px; }
-  dt { color:var(--muted); } dd { margin:0; }
-  @media (max-width:780px) { main { grid-template-columns:1fr; } .gallery { min-height:340px; } }
+  body { margin:0; color:var(--ink); background:#fff; font:14px/1.5 Helvetica, Arial, sans-serif; }
+  a { color:inherit; }
+  .notice { background:#fff8e1; border-bottom:1px solid var(--line); padding:8px 16px; text-align:center; }
+  header { max-width:1100px; margin:0 auto; padding:14px 16px; border-bottom:1px solid var(--line); display:flex; align-items:baseline; gap:10px; }
+  header b { font-size:18px; }
+  header span { color:var(--muted); }
+  main { max-width:1100px; margin:0 auto; padding:20px 16px 48px; display:grid; grid-template-columns:minmax(0,1.15fr) minmax(300px,.85fr); gap:28px; }
+  .stage { border:1px solid var(--line); background:var(--soft); aspect-ratio:1/1; display:grid; place-items:center; overflow:hidden; position:relative; }
+  .stage img { width:100%; height:100%; object-fit:contain; }
+  .stage .tag { position:absolute; left:10px; top:10px; background:#fff; border:1px solid var(--line); padding:2px 8px; font-size:12px; }
+  .thumbs { display:flex; gap:8px; margin-top:8px; overflow-x:auto; padding-bottom:2px; }
+  .thumbs button { flex:0 0 auto; width:72px; height:72px; padding:0; border:1px solid var(--line); background:#fff; cursor:pointer; overflow:hidden; }
+  .thumbs button[aria-current="true"] { border-color:var(--ink); border-width:2px; }
+  .thumbs img { width:100%; height:100%; object-fit:cover; display:block; }
+  .thumbs figcaption { display:none; }
+  h1 { font-size:22px; line-height:1.25; margin:0 0 6px; font-weight:600; }
+  .sub { color:var(--muted); margin-bottom:14px; }
+  .price { font-size:30px; font-weight:600; margin:10px 0 2px; }
+  .fine { color:var(--muted); font-size:13px; }
+  .cta { display:grid; gap:8px; margin:16px 0; }
+  .cta button { font:inherit; font-size:15px; padding:11px 14px; border:1px solid var(--ink); background:var(--ink); color:#fff; cursor:not-allowed; }
+  .cta button.secondary { background:#fff; color:var(--ink); }
+  .facts { border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:12px 0; margin:14px 0; display:grid; grid-template-columns:auto 1fr; gap:6px 16px; }
+  .facts dt { color:var(--muted); } .facts dd { margin:0; }
+  .card { border:1px solid var(--line); padding:14px 16px; margin-top:16px; }
+  .card h2 { font-size:15px; margin:0 0 8px; font-weight:600; }
+  .card p { margin:0; white-space:pre-wrap; }
+  .card dl { margin:0; display:grid; grid-template-columns:auto 1fr; gap:6px 16px; }
+  .card dt { color:var(--muted); } .card dd { margin:0; }
+  .truth { background:var(--soft); }
+  .truth ul { margin:0; padding-left:18px; }
+  @media (max-width:760px) {
+    main { grid-template-columns:1fr; gap:18px; padding-top:14px; }
+    .price { font-size:26px; }
+  }
 </style>
 </head>
 <body>
 <div class="notice">Demo listing. This item has not been published to eBay.</div>
-<header><span>Liquid</span> marketplace preview</header>
+<header><b>Liquid</b><span>marketplace preview · eBay format</span></header>
 <main>
-  <section class="gallery">
-    {% if photos %}<img src="/api/photos/{{ photos[0].id }}/file" alt="{{ pack.title }}">{% else %}<p>Photo unavailable</p>{% endif %}
+  <section>
+    <div class="stage">
+      {% if photos %}
+        <img id="stage-img" src="/api/photos/{{ photos[0].id }}/file" alt="{{ pack.title }}">
+        <span id="stage-tag" class="tag">{{ "Enhanced" if photos[0].id in enhanced_ids else "Original photo" }}</span>
+      {% else %}
+        <p class="fine">Photo unavailable</p>
+      {% endif %}
+    </div>
+    {% if photos|length > 1 %}
+    <div class="thumbs" role="tablist" aria-label="Photos">
+      {% for photo in photos %}
+      <button type="button" role="tab" aria-current="{{ 'true' if loop.first else 'false' }}"
+              data-src="/api/photos/{{ photo.id }}/file"
+              data-tag="{{ 'Enhanced' if photo.id in enhanced_ids else 'Original photo' }}"
+              title="{{ 'Enhanced' if photo.id in enhanced_ids else 'Original photo' }}">
+        <img src="/api/photos/{{ photo.id }}/file" alt="">
+      </button>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="card truth">
+      <h2>About these photos</h2>
+      <ul>
+        <li>The seller's untouched original is always included.</li>
+        <li>Enhanced photos change only lighting, background and framing. Damage, labels, color and included accessories are unchanged.</li>
+        <li>Nothing is published until the seller approves the photo set.</li>
+      </ul>
+    </div>
   </section>
+
   <section>
     <h1>{{ pack.title }}</h1>
-    <div class="condition">Condition: {{ pack.condition | replace("_", " ") | title }}</div>
+    <div class="sub">{{ condition_label }}{% if pack.specifics_json and pack.specifics_json.get("Brand") %} · {{ pack.specifics_json.get("Brand") }}{% endif %}</div>
+
     <div class="price">{{ pack.price_cents | dollars }}</div>
-    <div class="button">Demo purchase button</div>
+    <div class="fine">Priced to sell by {{ deadline.strftime("%a, %b %-d") }}. Liquid lowers the price on a schedule until then, never below the seller's floor.</div>
+
+    <div class="cta">
+      <button type="button" disabled title="Demo listing, purchases are disabled">Buy It Now</button>
+      <button type="button" class="secondary" disabled title="Demo listing, offers are disabled">Make Offer</button>
+    </div>
+
+    <dl class="facts">
+      <dt>Condition</dt><dd>{{ condition_label }}</dd>
+      <dt>Shipping</dt><dd>{{ shipping_label }}</dd>
+      <dt>Returns</dt><dd>Sold as described. See photos and description.</dd>
+      <dt>Listed</dt><dd>{{ (pack.published_at or pack.created_at).strftime("%b %-d, %Y") }}</dd>
+      <dt>Item number</dt><dd>{{ pack.external_id }}</dd>
+    </dl>
+
     <div class="card"><h2>About this item</h2><p>{{ pack.description }}</p></div>
-    {% if pack.specifics_json %}<div class="card"><h2>Item specifics</h2><dl>{% for name, value in pack.specifics_json.items() %}<dt>{{ name }}</dt><dd>{{ value }}</dd>{% endfor %}</dl></div>{% endif %}
+
+    {% if pack.specifics_json %}
+    <div class="card"><h2>Item specifics</h2><dl>
+      {% for name, value in pack.specifics_json.items() %}<dt>{{ name }}</dt><dd>{{ value }}</dd>{% endfor %}
+      <dt>Category</dt><dd>{{ item.category | replace("_", " ") | title }}</dd>
+    </dl></div>
+    {% endif %}
+
+    <div class="card"><h2>Seller</h2><p>Listed through Liquid, a selling agent that works over iMessage. Buyers purchase on the marketplace as usual. Liquid never handles payment.</p></div>
   </section>
 </main>
+<script>
+  (function () {
+    var img = document.getElementById("stage-img");
+    var tag = document.getElementById("stage-tag");
+    if (!img) return;
+    var tabs = document.querySelectorAll(".thumbs button");
+    tabs.forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        img.src = tab.getAttribute("data-src");
+        if (tag) tag.textContent = tab.getAttribute("data-tag");
+        tabs.forEach(function (t) { t.setAttribute("aria-current", t === tab ? "true" : "false"); });
+      });
+    });
+  })();
+</script>
 </body>
 </html>
