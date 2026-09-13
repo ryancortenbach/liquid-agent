@@ -910,3 +910,121 @@ def test_photo_approval_confirms_and_asks_the_next_question(tmp_path: Path) -> N
         assert reply.strip(), "approval reply was empty"
         assert "Locked in." in reply
         assert "How would you describe the condition?" in reply
+
+
+def _revert_app(tmp_path: Path, adapter: FakeMessageAdapter, **overrides):
+    settings = dict(
+        mode=Mode.SIM,
+        database_url="sqlite:///:memory:",
+        photo_storage_dir=str(tmp_path),
+        bb_webhook_secret="webhook-secret",
+        bb_allowed_destination="ryancortenbach77@gmail.com",
+        seller_handle="*",
+        require_ebay_onboarding=False,
+        openai_api_key=None,
+    )
+    settings.update(overrides)
+    return create_app(Settings(**settings), photo_editor=FakePhotoEditor(), message_adapter=adapter)
+
+
+def _post(client: TestClient, guid: str, text: str, **kwargs) -> None:
+    client.post(
+        "/webhooks/bluebubbles?secret=webhook-secret",
+        json=message_payload(guid=guid, text=text, **kwargs),
+    )
+
+
+def test_seller_can_reject_a_photo_after_approving_it(tmp_path: Path) -> None:
+    """Approval is not final until the listing is posted."""
+    from app.models import Item, PhotoRole, PhotoStatus, ProductPhoto
+
+    adapter = FakeMessageAdapter()
+    app = _revert_app(tmp_path, adapter)
+    with TestClient(app) as client:
+        _post(client, "rv-1", "Sony headphones", with_photo=True)
+        _post(client, "rv-2", "yes")
+        with Session(app.state.engine) as session:
+            enhanced = session.exec(
+                select(ProductPhoto).where(ProductPhoto.role == PhotoRole.ENHANCED)
+            ).one()
+            assert enhanced.status == PhotoStatus.APPROVED
+            item = session.exec(select(Item)).one()
+            assert enhanced.file_path in item.photo_paths
+            original_paths = [p for p in item.photo_paths if p != enhanced.file_path]
+            assert original_paths, "original photo must be on the item"
+
+        _post(client, "rv-3", "use original")
+        reply = adapter.sent_texts[-1]
+        assert "original" in reply.lower(), reply
+        with Session(app.state.engine) as session:
+            enhanced = session.exec(
+                select(ProductPhoto).where(ProductPhoto.role == PhotoRole.ENHANCED)
+            ).one()
+            assert enhanced.status == PhotoStatus.REJECTED
+            item = session.exec(select(Item)).one()
+            assert enhanced.file_path not in item.photo_paths
+            assert item.photo_paths == original_paths
+            conversation = session.exec(select(SellerConversation)).one()
+            assert conversation.status == ConversationStatus.AWAITING_DETAILS
+
+        # The flow keeps going from where it was.
+        _post(client, "rv-4", "2, just the item")
+        assert "How fast" in adapter.sent_texts[-1], adapter.sent_texts[-1]
+
+
+def test_plain_no_during_details_does_not_revert_the_photo(tmp_path: Path) -> None:
+    from app.models import PhotoRole, PhotoStatus, ProductPhoto
+
+    adapter = FakeMessageAdapter()
+    app = _revert_app(tmp_path, adapter)
+    with TestClient(app) as client:
+        _post(client, "nd-1", "Sony headphones", with_photo=True)
+        _post(client, "nd-2", "yes")
+        _post(client, "nd-3", "no")
+        with Session(app.state.engine) as session:
+            enhanced = session.exec(
+                select(ProductPhoto).where(ProductPhoto.role == PhotoRole.ENHANCED)
+            ).one()
+            assert enhanced.status == PhotoStatus.APPROVED
+
+
+def test_reject_while_preview_is_pending_still_works(tmp_path: Path) -> None:
+    from app.models import PhotoRole, PhotoStatus, ProductPhoto
+
+    adapter = FakeMessageAdapter()
+    app = _revert_app(tmp_path, adapter)
+    with TestClient(app) as client:
+        _post(client, "pp-1", "Sony headphones", with_photo=True)
+        _post(client, "pp-2", "reject")
+        assert adapter.sent_texts[-1] == "No problem. We'll keep your original."
+        with Session(app.state.engine) as session:
+            enhanced = session.exec(
+                select(ProductPhoto).where(ProductPhoto.role == PhotoRole.ENHANCED)
+            ).one()
+            assert enhanced.status == PhotoStatus.REJECTED
+
+
+def test_cannot_revert_photo_after_the_listing_is_posted(tmp_path: Path) -> None:
+    from app.models import PhotoRole, PhotoStatus, ProductPhoto
+
+    adapter = FakeMessageAdapter()
+    app = _revert_app(
+        tmp_path, adapter, ebay_demo_mode=True, public_base_url="https://demo.example.com"
+    )
+    with TestClient(app) as client:
+        _post(client, "pl-1", "Sony headphones", with_photo=True)
+        _post(client, "pl-2", "approve")
+        _post(client, "pl-3", "good, just the item")
+        _post(client, "pl-4", "1 day, you decide, ship, ebay only")
+        _post(client, "pl-5", "yes")
+        with Session(app.state.engine) as session:
+            assert session.exec(select(SellerConversation)).one().status == (
+                ConversationStatus.LISTED
+            )
+        _post(client, "pl-6", "use original")
+        assert "already posted" in adapter.sent_texts[-1], adapter.sent_texts[-1]
+        with Session(app.state.engine) as session:
+            enhanced = session.exec(
+                select(ProductPhoto).where(ProductPhoto.role == PhotoRole.ENHANCED)
+            ).one()
+            assert enhanced.status == PhotoStatus.APPROVED

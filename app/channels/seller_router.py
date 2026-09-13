@@ -67,6 +67,34 @@ EBAY_RETRY_WORDS = {
 }
 EBAY_CHECK_WORDS = {"connected", "done", "ebay status", "check ebay", "status"}
 EBAY_SKIP_WORDS = {"cancel", "skip", "not now", "later", "never mind", "nevermind"}
+PHOTO_REVERT_WORDS = {
+    "reject",
+    "reject photo",
+    "reject the photo",
+    "use original",
+    "use the original",
+    "use my original",
+    "use the original photo",
+    "use original photo",
+    "original photo",
+    "keep the original",
+    "keep original",
+    "do not use",
+    "don't use it",
+    "dont use it",
+    "undo photo",
+    "go back to the original",
+    "i don't like the photo",
+    "i dont like the photo",
+}
+POSTED_ITEM_STATUSES = {
+    ItemStatus.LIVE,
+    ItemStatus.SALE_PENDING,
+    ItemStatus.SOLD,
+    ItemStatus.LABELED,
+    ItemStatus.SCHEDULED,
+    ItemStatus.DONE,
+}
 TERMINAL_ITEM_STATUSES = {
     ItemStatus.SOLD,
     ItemStatus.DONE,
@@ -412,12 +440,24 @@ class SellerMessageRouter:
         return True
 
     async def handle_control(self, message: InboundMessage) -> bool:
-        lowered = message.text.strip().lower()
-        if lowered not in START_OVER_WORDS | BACK_WORDS | RESUME_WORDS | HELP_WORDS:
+        lowered = message.text.strip().lower().rstrip(".!")
+        if lowered not in (
+            START_OVER_WORDS | BACK_WORDS | RESUME_WORDS | HELP_WORDS | PHOTO_REVERT_WORDS
+        ):
             return False
 
-        if lowered in HELP_WORDS:
-            response = "Sure. You can text: status · resume · back · start over · connect email"
+        if lowered in PHOTO_REVERT_WORDS:
+            # A seller can change their mind about an enhanced photo at any point before
+            # it is posted, not only while the preview is waiting for a yes or no.
+            if self._has_pending_review(message.handle):
+                await self._review_pending(message, approved=False)
+                return True
+            response = self._revert_approved_photos(message.handle)
+        elif lowered in HELP_WORDS:
+            response = (
+                "Sure. You can text: status · resume · back · start over · use original · "
+                "connect email"
+            )
         elif lowered in START_OVER_WORDS:
             with Session(self.engine) as session:
                 conversation = session.exec(
@@ -461,6 +501,97 @@ class SellerMessageRouter:
 
         await self.adapter.send_text(message.chat_guid, response, f"{message.guid}:control")
         return True
+
+    def _has_pending_review(self, handle: str) -> bool:
+        with Session(self.engine) as session:
+            conversation = session.exec(
+                select(SellerConversation).where(SellerConversation.handle == handle)
+            ).first()
+            if (
+                conversation is None
+                or conversation.status != ConversationStatus.AWAITING_PHOTO_REVIEW
+            ):
+                return False
+            anchor = (
+                session.get(Item, conversation.active_item_id)
+                if conversation.active_item_id
+                else None
+            )
+            pending_ids = list(
+                (anchor.constraints_json.get("pending_photo_ids") if anchor else None)
+                or ([conversation.pending_photo_id] if conversation.pending_photo_id else [])
+            )
+            return any(
+                (photo := session.get(ProductPhoto, photo_id)) is not None
+                and photo.status == PhotoStatus.REVIEW
+                for photo_id in pending_ids
+            )
+
+    def _revert_approved_photos(self, handle: str) -> str:
+        """Withdraw approval of enhanced photos and fall back to the seller's originals."""
+        with Session(self.engine) as session:
+            conversation = session.exec(
+                select(SellerConversation).where(SellerConversation.handle == handle)
+            ).first()
+            if conversation is None or conversation.active_item_id is None:
+                return (
+                    "There's no photo to change right now. Send me a photo whenever you're ready."
+                )
+            anchor = session.get(Item, conversation.active_item_id)
+            if anchor is None:
+                return (
+                    "There's no photo to change right now. Send me a photo whenever you're ready."
+                )
+            item_ids = {anchor.id, *(anchor.constraints_json.get("batch_item_ids") or [])}
+            items = [item for item_id in item_ids if (item := session.get(Item, item_id))]
+            if conversation.status in {
+                ConversationStatus.PUBLISHING,
+                ConversationStatus.LISTED,
+            } or any(item.status in POSTED_ITEM_STATUSES for item in items):
+                return (
+                    "That one's already posted with the new photo, so I can't swap it here. "
+                    "Say start over if you want to redo it."
+                )
+            approved = [
+                photo
+                for item in items
+                for photo in session.exec(
+                    select(ProductPhoto).where(
+                        ProductPhoto.item_id == item.id,
+                        ProductPhoto.role == PhotoRole.ENHANCED,
+                        ProductPhoto.status == PhotoStatus.APPROVED,
+                    )
+                ).all()
+            ]
+            if not approved:
+                return "You're already on your original photo. Nothing to change."
+            now = self.clock.now()
+            for photo in approved:
+                item = session.get(Item, photo.item_id)
+                photo.status = PhotoStatus.REJECTED
+                photo.reviewed_at = now
+                session.add(photo)
+                if item is not None and photo.file_path in item.photo_paths:
+                    item.photo_paths = [
+                        path for path in item.photo_paths if path != photo.file_path
+                    ]
+                    session.add(item)
+                write_decision(
+                    session,
+                    item_id=photo.item_id,
+                    sim_at=now,
+                    wall_at=self.clock.wall(),
+                    kind="seller",
+                    action="reject_photo",
+                    inputs={"photo_id": photo.id, "channel": "imessage", "after_approval": True},
+                    reason="seller withdrew approval of an AI-enhanced image in iMessage",
+                    price_before=None,
+                    price_after=None,
+                )
+            session.commit()
+            count = len(approved)
+        noun = "photos" if count > 1 else "photo"
+        return f"No problem. I'll use your original {noun} instead. We can keep going from here."
 
     def _back_response(self, handle: str) -> str:
         with Session(self.engine) as session:
