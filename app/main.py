@@ -32,6 +32,7 @@ from app.engine.frontier import compute_frontier
 from app.engine.load_state import load_state
 from app.engine.policy import decide
 from app.engine.state import ItemState, default_channels
+from app.inbound.identify import ClaudeIdentifier, Identifier
 from app.intake.details import IntakeDetails, merge_details
 from app.intake.flow import ListingFlow, pack_dict
 from app.intake.router import PipelineRouter
@@ -181,6 +182,7 @@ def create_app(
     photo_editor: ProductPhotoEditor | None = None,
     message_adapter: BlueBubblesAdapter | None = None,
     ebay_publisher: EbayPublisher | None = None,
+    identifier: Identifier | None = None,
 ) -> FastAPI:
     app_settings = settings or get_settings()
 
@@ -207,6 +209,11 @@ def create_app(
                 app_settings.bb_password,
             )
             app.state.owns_message_adapter = True
+        app.state.identifier = identifier
+        if app.state.identifier is None and app_settings.anthropic_api_key:
+            app.state.identifier = ClaudeIdentifier(
+                app_settings.anthropic_api_key, model=app_settings.claude_model
+            )
         app.state.seller_router = None
         if app.state.message_adapter is not None and app_settings.seller_handle:
             app.state.seller_router = SellerMessageRouter(
@@ -217,6 +224,7 @@ def create_app(
                 storage=app.state.photo_storage,
                 seller_handle=app_settings.seller_handle,
                 timezone=app_settings.tz,
+                identifier=app.state.identifier,
             )
         app.state.ebay_publisher = ebay_publisher
         app.state.owns_ebay_publisher = False

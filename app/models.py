@@ -71,6 +71,7 @@ class PhotoStatus(StrEnum):
 class ConversationStatus(StrEnum):
     READY = "ready"
     PROCESSING_PHOTO = "processing_photo"
+    AWAITING_IDENTITY = "awaiting_identity"
     AWAITING_PHOTO_REVIEW = "awaiting_photo_review"
     AWAITING_DETAILS = "awaiting_details"
     RESEARCHING = "researching"
