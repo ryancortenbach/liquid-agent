@@ -50,6 +50,7 @@ from app.market.ebay import (
     EbayPublisher,
     EbaySandboxClient,
 )
+from app.market.ebay_demo import DemoEbayPublisher
 from app.market.ebay_oauth import EbayConnectionService, EbayOAuthClient
 from app.market.ebay_taxonomy import EbayTaxonomyClient
 from app.market.fees import instant_quote_cents
@@ -207,6 +208,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        app.state.settings = app_settings
         app.state.engine = make_engine(app_settings.database_url)
         create_db_and_tables(app.state.engine)
         app.state.clock = build_clock(app_settings)
@@ -334,12 +336,16 @@ def create_app(
                     else None
                 ),
                 require_ebay_onboarding=app_settings.require_ebay_onboarding,
+                ebay_demo_mode=app_settings.ebay_demo_mode,
                 identifier=app.state.identifier,
                 reviewer=app.state.photo_reviewer,
             )
         app.state.ebay_publisher = ebay_publisher
         app.state.owns_ebay_publisher = False
-        if app.state.ebay_publisher is None and all(
+        if app.state.ebay_publisher is None and app_settings.ebay_demo_mode:
+            app.state.ebay_publisher = DemoEbayPublisher()
+            app.state.owns_ebay_publisher = True
+        elif app.state.ebay_publisher is None and all(
             (
                 app_settings.ebay_sb_client_id,
                 app_settings.ebay_sb_client_secret,
@@ -447,7 +453,12 @@ def create_app(
 
     @app.get("/health")
     def health(clock: ClockDep) -> dict:
-        return {"status": "ok", "mode": app_settings.mode, "sim_at": clock.now()}
+        return {
+            "status": "ok",
+            "mode": app_settings.mode,
+            "ebay_mode": "demo" if app_settings.ebay_demo_mode else app_settings.ebay_environment,
+            "sim_at": clock.now(),
+        }
 
     @app.get("/oauth/ebay/callback", response_class=HTMLResponse)
     async def ebay_oauth_callback(

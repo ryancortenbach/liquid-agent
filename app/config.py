@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     bb_webhook_base_url: str = "http://127.0.0.1:8000"
     seller_handle: str | None = None
     require_ebay_onboarding: bool = True
+    ebay_demo_mode: bool = False
     ebay_client_id: str | None = None
     ebay_client_secret: str | None = None
     ebay_runame: str | None = None

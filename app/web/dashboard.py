@@ -13,6 +13,7 @@ from app.models import (
     LedgerEvent,
     ListingPack,
     PhotoRole,
+    PhotoStatus,
     ProductPhoto,
     ResearchResult,
     SellerConversation,
@@ -101,5 +102,40 @@ def dashboard_item(item_id: str, request: Request) -> HTMLResponse:
                 "intake": item.constraints_json.get("intake") or {},
                 "hours_left": hours_left,
                 "clock": now,
+            },
+        )
+
+
+@router.get("/demo/ebay/listings/{listing_id}", response_class=HTMLResponse)
+def demo_ebay_listing(listing_id: str, request: Request) -> HTMLResponse:
+    if not request.app.state.settings.ebay_demo_mode:
+        raise HTTPException(status_code=404, detail="demo listings are disabled")
+    with Session(request.app.state.engine) as session:
+        pack = session.exec(
+            select(ListingPack).where(
+                ListingPack.channel == "ebay", ListingPack.external_id == listing_id
+            )
+        ).first()
+        if pack is None:
+            raise HTTPException(status_code=404, detail="demo listing not found")
+        item = session.get(Item, pack.item_id)
+        if item is None:
+            raise HTTPException(status_code=404, detail="item not found")
+        photos = session.exec(
+            select(ProductPhoto)
+            .where(
+                ProductPhoto.item_id == item.id,
+                ProductPhoto.status == PhotoStatus.APPROVED,
+            )
+            .order_by(ProductPhoto.created_at)
+        ).all()
+        return templates.TemplateResponse(
+            request,
+            "demo_ebay.html",
+            {
+                "item": item,
+                "pack": pack,
+                "photos": photos,
+                "clock": request.app.state.clock.now(),
             },
         )

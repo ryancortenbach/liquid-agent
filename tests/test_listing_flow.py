@@ -249,6 +249,35 @@ def test_go_publishes_to_ebay_sandbox_when_configured(tmp_path: Path) -> None:
             assert pack.status == ListingPackStatus.PUBLISHED and pack.external_id == "1100001"
 
 
+def test_ebay_demo_mode_publishes_working_preview_without_credentials(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    settings = make_settings(
+        tmp_path,
+        public_base_url="https://demo.example.com",
+        ebay_demo_mode=True,
+    )
+    app = create_app(settings, photo_editor=FakePhotoEditor(), message_adapter=adapter)
+
+    with TestClient(app) as client:
+        send(client, "demo-1", "Sony WH-1000XM5 headphones", with_photo=True)
+        send(client, "demo-2", "approve")
+        send(client, "demo-3", "like new, just the item")
+        send(client, "demo-4", "week, you decide, ship, ebay only")
+        send(client, "demo-5", "go")
+
+        final = adapter.sent_texts[-1]
+        assert "ebay demo preview: https://demo.example.com/demo/ebay/listings/" in final
+        with Session(app.state.engine) as session:
+            pack = session.exec(select(ListingPack)).one()
+            assert pack.status == ListingPackStatus.PUBLISHED
+            assert pack.external_id and pack.external_id.startswith("demo-listing-")
+            preview_path = pack.external_url.removeprefix("https://demo.example.com")
+        preview = client.get(preview_path)
+        assert preview.status_code == 200
+        assert "Demo listing. This item has not been published to eBay." in preview.text
+        assert "Sony WH-1000XM5 headphones" in preview.text
+
+
 def test_publishing_advances_to_next_batch_item(tmp_path: Path) -> None:
     adapter = FakeMessageAdapter()
     app = create_app(

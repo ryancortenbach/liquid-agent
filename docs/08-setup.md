@@ -59,6 +59,12 @@ connection record.
 
 Liquid uses two eBay keysets, both from developer.ebay.com > Application Keys.
 
+For a credential-free hackathon run, set `EBAY_DEMO_MODE=true`. The first seller message creates
+a demo connection automatically, and publishing produces a working Liquid-hosted preview URL.
+The preview is visibly labeled as a demo and does not claim to be a live eBay listing. Set the
+flag back to `false` after the developer keyset is available. Demo connection records never count
+as real eBay authorization after the flag is disabled.
+
 - **Production keyset** (`EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET`): read-only. Powers active comps
   through the Browse API and category suggestions through the Taxonomy API. No seller login.
 - **Sandbox keyset** (`EBAY_SB_CLIENT_ID`, `EBAY_SB_CLIENT_SECRET`, `EBAY_SB_RUNAME`): publishes

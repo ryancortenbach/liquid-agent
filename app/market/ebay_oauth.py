@@ -205,6 +205,8 @@ class EbayConnectionService:
             ).first()
         if connection is None:
             return None
+        if connection.environment == "demo":
+            return None
         publisher = EbayClient(
             self.oauth.client_id,
             self.oauth.client_secret,

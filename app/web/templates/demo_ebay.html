@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{ pack.title }} | Liquid demo listing</title>
+<style>
+  :root { --ink:#171717; --muted:#606060; --line:#d9d9d9; --blue:#3665f3; --soft:#f7f7f7; }
+  * { box-sizing:border-box; }
+  body { margin:0; color:var(--ink); background:#fff; font:16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .notice { background:#fff3cd; border-bottom:1px solid #e6cf76; padding:10px 20px; text-align:center; font-weight:650; }
+  header { max-width:1180px; margin:auto; padding:22px 24px; border-bottom:1px solid var(--line); font-size:24px; font-weight:800; }
+  header span { color:var(--blue); }
+  main { max-width:1180px; margin:36px auto; padding:0 24px; display:grid; grid-template-columns:minmax(0,1.2fr) minmax(320px,.8fr); gap:42px; }
+  .gallery { background:var(--soft); border-radius:18px; min-height:520px; display:grid; place-items:center; overflow:hidden; }
+  .gallery img { width:100%; height:100%; max-height:680px; object-fit:contain; }
+  h1 { font-size:28px; line-height:1.2; margin:0 0 18px; }
+  .condition { color:var(--muted); border-bottom:1px solid var(--line); padding-bottom:18px; }
+  .price { font-size:34px; font-weight:750; margin:22px 0; }
+  .button { display:block; color:#fff; background:var(--blue); border-radius:24px; padding:13px 18px; text-align:center; font-weight:700; }
+  .card { border:1px solid var(--line); border-radius:16px; padding:22px; margin-top:20px; }
+  .card h2 { font-size:18px; margin:0 0 12px; }
+  .card p { white-space:pre-wrap; }
+  dl { display:grid; grid-template-columns:auto 1fr; gap:8px 18px; }
+  dt { color:var(--muted); } dd { margin:0; }
+  @media (max-width:780px) { main { grid-template-columns:1fr; } .gallery { min-height:340px; } }
+</style>
+</head>
+<body>
+<div class="notice">Demo listing. This item has not been published to eBay.</div>
+<header><span>Liquid</span> marketplace preview</header>
+<main>
+  <section class="gallery">
+    {% if photos %}<img src="/api/photos/{{ photos[0].id }}/file" alt="{{ pack.title }}">{% else %}<p>Photo unavailable</p>{% endif %}
+  </section>
+  <section>
+    <h1>{{ pack.title }}</h1>
+    <div class="condition">Condition: {{ pack.condition | replace("_", " ") | title }}</div>
+    <div class="price">{{ pack.price_cents | dollars }}</div>
+    <div class="button">Demo purchase button</div>
+    <div class="card"><h2>About this item</h2><p>{{ pack.description }}</p></div>
+    {% if pack.specifics_json %}<div class="card"><h2>Item specifics</h2><dl>{% for name, value in pack.specifics_json.items() %}<dt>{{ name }}</dt><dd>{{ value }}</dd>{% endfor %}</dl></div>{% endif %}
+  </section>
+</main>
+</body>
+</html>

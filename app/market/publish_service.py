@@ -65,15 +65,15 @@ class EbayPublishError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class EbayPublishResult:
-    status: str  # live | draft
+    status: str  # live | draft | demo
     listing_id: str | None = None
     offer_id: str | None = None
     seller_approved: bool = False
 
     def as_dict(self) -> dict:
-        if self.status == "live":
+        if self.status in {"live", "demo"}:
             return {
-                "status": "live",
+                "status": self.status,
                 "listing_id": self.listing_id,
                 "seller_approved": True,
             }
@@ -88,6 +88,10 @@ def ebay_listing_url(listing_id: str, environment: str) -> str:
     if environment == "sandbox":
         return sandbox_listing_url(listing_id)
     return f"https://www.ebay.com/itm/{listing_id}"
+
+
+def demo_listing_url(listing_id: str, public_base_url: str) -> str:
+    return f"{public_base_url.rstrip('/')}/demo/ebay/listings/{listing_id}"
 
 
 async def publish_item_to_ebay(
@@ -123,18 +127,23 @@ async def publish_item_to_ebay(
         publisher = publisher_for_seller(seller_id) or publisher
     if publisher is None:
         raise EbayPublishError(503, "connect eBay before publishing")
-    required_settings = {
-        "merchant location": settings.ebay_sb_merchant_location_key,
-        "payment policy": settings.ebay_sb_payment_policy_id,
-        "return policy": settings.ebay_sb_return_policy_id,
-        "fulfillment policy": settings.ebay_sb_fulfillment_policy_id,
-    }
-    missing = [name for name, value in required_settings.items() if not value]
-    if missing:
-        raise EbayPublishError(503, f"eBay sandbox setup is missing: {', '.join(missing)}")
+    if not settings.ebay_demo_mode:
+        required_settings = {
+            "merchant location": settings.ebay_sb_merchant_location_key,
+            "payment policy": settings.ebay_sb_payment_policy_id,
+            "return policy": settings.ebay_sb_return_policy_id,
+            "fulfillment policy": settings.ebay_sb_fulfillment_policy_id,
+        }
+        missing = [name for name, value in required_settings.items() if not value]
+        if missing:
+            raise EbayPublishError(503, f"eBay sandbox setup is missing: {', '.join(missing)}")
     if not aspects:
         raise EbayPublishError(422, "at least one truthful item aspect is required")
-    image_base = public_image_base(settings)
+    image_base = (
+        settings.public_base_url.rstrip("/")
+        if settings.ebay_demo_mode
+        else public_image_base(settings)
+    )
     if image_base is None and not callable(getattr(publisher, "upload_picture", None)):
         raise EbayPublishError(503, "PUBLIC_BASE_URL must be a public HTTPS URL for eBay images")
 
@@ -155,7 +164,8 @@ async def publish_item_to_ebay(
             select(Listing).where(Listing.item_id == item_id, Listing.channel == "ebay")
         ).first()
         if listing is not None and listing.external_id and listing.status == ListingStatus.LIVE:
-            return EbayPublishResult("live", listing_id=listing.external_id, seller_approved=True)
+            status = "demo" if settings.ebay_demo_mode else "live"
+            return EbayPublishResult(status, listing_id=listing.external_id, seller_approved=True)
         resolved_price = price_cents or (listing.price_cents if listing else 0)
         if resolved_price <= 0:
             resolved_price = item.market_value_cents
@@ -250,11 +260,18 @@ async def publish_item_to_ebay(
                 "price_cents": listing.price_cents,
                 "marketplace_id": settings.ebay_marketplace_id,
             },
-            reason="seller approved publication to the eBay sandbox",
+            reason=(
+                "seller approved a simulated eBay publication"
+                if settings.ebay_demo_mode
+                else "seller approved publication to the eBay sandbox"
+            ),
             price_before=None,
             price_after=listing.price_cents,
         )
         session.commit()
     return EbayPublishResult(
-        "live", listing_id=publication.listing_id, offer_id=offer_id, seller_approved=True
+        "demo" if settings.ebay_demo_mode else "live",
+        listing_id=publication.listing_id,
+        offer_id=offer_id,
+        seller_approved=True,
     )

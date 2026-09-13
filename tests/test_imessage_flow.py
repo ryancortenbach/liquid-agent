@@ -307,6 +307,44 @@ def test_first_message_requires_ebay_and_blocks_photos_until_connected(tmp_path:
             assert session.exec(select(SellerConversation)).one().status == ConversationStatus.READY
 
 
+def test_ebay_demo_mode_auto_onboards_without_credentials(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    app = create_app(
+        Settings(
+            mode=Mode.SIM,
+            database_url="sqlite:///:memory:",
+            photo_storage_dir=str(tmp_path),
+            bb_webhook_secret="webhook-secret",
+            seller_handle="+14155550123",
+            ebay_demo_mode=True,
+            openai_api_key=None,
+        ),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+    )
+
+    with TestClient(app) as client:
+        first = client.post(
+            "/webhooks/bluebubbles?secret=webhook-secret",
+            json=message_payload(guid="demo-connect-1", text="hello"),
+        )
+        assert first.json()["status"] == "queued"
+        assert adapter.sent_texts == [
+            "ebay demo setup is complete. you're signed up. send a photo to begin."
+        ]
+        with Session(app.state.engine) as session:
+            connection = session.exec(select(EbayConnection)).one()
+            assert connection.environment == "demo"
+            assert session.exec(select(SellerConversation)).one().status == ConversationStatus.READY
+
+        connected = client.post(
+            "/webhooks/bluebubbles?secret=webhook-secret",
+            json=message_payload(guid="demo-connect-2", text="connect ebay"),
+        )
+        assert connected.json()["status"] == "queued"
+        assert adapter.sent_texts[-1].startswith("ebay demo is connected")
+
+
 def test_unconnected_seller_can_retry_or_check_but_not_skip(tmp_path: Path) -> None:
     adapter = FakeMessageAdapter()
     app = create_app(

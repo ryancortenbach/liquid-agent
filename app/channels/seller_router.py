@@ -168,6 +168,7 @@ class SellerMessageRouter:
         ebay_authorization_url: Callable[[str], str] | None = None,
         email_authorization_url: Callable[[str], str] | None = None,
         require_ebay_onboarding: bool = True,
+        ebay_demo_mode: bool = False,
         identifier: Identifier | None = None,
         reviewer: PhotoTruthReviewer | None = None,
     ) -> None:
@@ -183,6 +184,7 @@ class SellerMessageRouter:
         self.ebay_authorization_url = ebay_authorization_url
         self.email_authorization_url = email_authorization_url
         self.require_ebay_onboarding = require_ebay_onboarding
+        self.ebay_demo_mode = ebay_demo_mode
         self.identifier = identifier
         self.reviewer = reviewer
 
@@ -300,6 +302,43 @@ class SellerMessageRouter:
             connected = session.exec(
                 select(EbayConnection).where(EbayConnection.seller_id == conversation.seller_id)
             ).first()
+            if self.ebay_demo_mode:
+                if connected is None:
+                    connected = EbayConnection(
+                        seller_id=conversation.seller_id,
+                        environment="demo",
+                        encrypted_refresh_token="demo-mode",
+                        scopes_json=["demo"],
+                    )
+                    session.add(connected)
+                    first_prompt = True
+                else:
+                    first_prompt = False
+                if conversation.status == ConversationStatus.AWAITING_EBAY:
+                    conversation.status = ConversationStatus.READY
+                conversation.updated_at = self.clock.now()
+                session.add(conversation)
+                session.commit()
+                if first_prompt:
+                    if message.attachments:
+                        await self.adapter.send_text(
+                            message.chat_guid,
+                            (
+                                "ebay demo setup is complete. you're signed up. "
+                                "i'm processing that photo now."
+                            ),
+                            f"{message.guid}:ebay-demo-onboarding",
+                        )
+                        return False
+                    await self.adapter.send_text(
+                        message.chat_guid,
+                        "ebay demo setup is complete. you're signed up. send a photo to begin.",
+                        f"{message.guid}:ebay-demo-onboarding",
+                    )
+                    return True
+                return False
+            if connected is not None and connected.environment == "demo":
+                connected = None
             if connected is not None:
                 if conversation.status == ConversationStatus.AWAITING_EBAY:
                     conversation.status = ConversationStatus.READY
@@ -407,7 +446,9 @@ class SellerMessageRouter:
         return "nothing to go back to. send a photo to start."
 
     async def _connect_ebay(self, message: InboundMessage) -> None:
-        if self.ebay_authorization_url is None:
+        if self.ebay_demo_mode:
+            response = "ebay demo is connected. send a photo and i'll build the listing."
+        elif self.ebay_authorization_url is None:
             response = "ebay connect isn't set up yet."
         else:
             with Session(self.engine) as session:

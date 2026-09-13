@@ -25,7 +25,12 @@ from app.listing.handoff import build_handoffs, dollars
 from app.listing.pack import replace_draft_packs
 from app.market.ebay import EbayPublisher
 from app.market.ebay_taxonomy import EbayTaxonomyClient
-from app.market.publish_service import EbayPublishError, ebay_listing_url, publish_item_to_ebay
+from app.market.publish_service import (
+    EbayPublishError,
+    demo_listing_url,
+    ebay_listing_url,
+    publish_item_to_ebay,
+)
 from app.models import (
     ConversationStatus,
     Item,
@@ -495,11 +500,15 @@ class ListingFlow:
                         taxonomy=self.ebay_taxonomy,
                         photo_storage=self.photo_storage,
                     )
-                    listing_url = (
-                        ebay_listing_url(result.listing_id, self.settings.ebay_environment)
-                        if result.listing_id
-                        else None
-                    )
+                    listing_url = None
+                    if result.listing_id:
+                        listing_url = (
+                            demo_listing_url(result.listing_id, self.settings.public_base_url)
+                            if self.settings.ebay_demo_mode
+                            else ebay_listing_url(
+                                result.listing_id, self.settings.ebay_environment
+                            )
+                        )
                     with Session(self.engine) as session:
                         pack = session.get(ListingPack, pack_id)
                         assert pack is not None
@@ -512,11 +521,12 @@ class ListingFlow:
                         session.commit()
                     ebay_live = True
                     outcomes["ebay"] = {
-                        "status": "live",
+                        "status": "demo" if self.settings.ebay_demo_mode else "live",
                         "listing_id": result.listing_id,
                         "url": listing_url,
                     }
-                    messages.append(f"ebay: {listing_url}")
+                    label = "ebay demo preview" if self.settings.ebay_demo_mode else "ebay"
+                    messages.append(f"{label}: {listing_url}")
                     if listing_url:
                         published_links.append(listing_url)
                 except EbayPublishError as exc:
@@ -593,9 +603,14 @@ class ListingFlow:
         if any(value["status"] == "handoff_ready" for value in outcomes.values()):
             messages.append("facebook + offerup: paste the messages above into the apps.")
         if published_links and self.email_notifier is not None:
-            email_text = "Your listing is live:\n" + "\n".join(published_links)
+            if self.settings.ebay_demo_mode:
+                email_subject = "Your Liquid demo listing preview"
+                email_text = "Your demo listing preview is ready:\n" + "\n".join(published_links)
+            else:
+                email_subject = "Your Liquid listing is live"
+                email_text = "Your listing is live:\n" + "\n".join(published_links)
             try:
-                await self.email_notifier(seller_id, "Your Liquid listing is live", email_text)
+                await self.email_notifier(seller_id, email_subject, email_text)
             except Exception as exc:
                 log.warning("Could not email published listing link: %s", exc)
         if messages:

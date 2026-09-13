@@ -92,6 +92,11 @@ the business policies and ship-from location and writes their ids to `.env`, and
 reprice, and cleanup live. Photos are hosted on eBay Picture Services at publish time, so no
 tunnel is required. Details in `docs/08-setup.md`.
 
+If eBay developer approval is still pending, set `EBAY_DEMO_MODE=true`. Seller onboarding then
+completes locally, the rest of the real workflow remains active, and publication returns a working
+Liquid-hosted listing preview with an explicit demo disclosure. Turning the flag off restores the
+normal per-seller OAuth and official eBay publishing path.
+
 At any point in Messages, `STATUS` reports progress, `RESUME` repeats the next step, `BACK`
 explains how to revise the current step, and `START OVER` cancels the active draft safely.
 With `OPENAI_CHAT_ENABLED=true`, a structured intent layer uses the saved workflow state and recent
