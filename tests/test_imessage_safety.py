@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from test_imessage_flow import FakeMessageAdapter, FakePhotoEditor, message_payload
 
 from app.channels.imessage_bluebubbles import BlueBubblesAdapter, is_group_chat
 from app.config import Mode, Settings
 from app.main import create_app
-from test_imessage_flow import FakeMessageAdapter, FakePhotoEditor, message_payload
 
 LIQUID = "liquid@icloud.com"
 

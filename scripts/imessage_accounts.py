@@ -21,7 +21,8 @@ from pathlib import Path
 
 import httpx
 
-from app.channels.imessage_bluebubbles import GROUP_CHAT_STYLE, canonical_handle
+from app.channels.imessage_bluebubbles import GROUP_CHAT_STYLE
+from app.channels.seller_router import canonical_handle
 from app.config import get_settings
 from app.envfile import update_env_file
 
@@ -48,7 +49,12 @@ async def aliases_from_bluebubbles(server_url: str, password: str) -> Counter[tu
             response = await client.post(
                 f"{server_url.rstrip('/')}/api/v1/chat/query",
                 params={"password": password},
-                json={"limit": 500, "offset": offset, "with": ["participants"], "sort": "lastmessage"},
+                json={
+                    "limit": 500,
+                    "offset": offset,
+                    "with": ["participants"],
+                    "sort": "lastmessage",
+                },
             )
             response.raise_for_status()
             chats = response.json().get("data") or []
@@ -98,7 +104,8 @@ def print_policy(settings, aliases: set[str]) -> str:
             "CLOSED: BB_ALLOWED_DESTINATION is blank, so Liquid ignores every text until you run "
             "this script with --set <liquid alias>"
         )
-    verdict += "\nGroup chats: " + ("answered (risky)" if settings.bb_allow_group_chats else "ignored")
+    groups = "answered (risky)" if settings.bb_allow_group_chats else "ignored"
+    verdict += f"\nGroup chats: {groups}"
     print(verdict)
     return verdict
 
