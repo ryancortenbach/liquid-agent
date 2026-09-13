@@ -1,0 +1,9 @@
+INFO:     Started server process [23705]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+2026-09-13 15:31:13,023 WARNING app.main Liquid inbound ignored sender=***0147 reason=sender_not_allowed
+2026-09-13 15:33:03,330 INFO app.main Liquid inbound queued sender=***3040 guid=24D2143F-24D5-428A-BC25-D91E296E9486 text='Hi' attachments=0
+2026-09-13 15:33:03,653 INFO app.main Liquid inbound queued sender=***3040 guid=2B2D43BB-C084-4972-BA24-2B1B20134104 text='Hi' attachments=0
+2026-09-13 15:33:07,257 INFO app.main Liquid inbound completed sender=***3040 guid=24D2143F-24D5-428A-BC25-D91E296E9486 acknowledged=False elapsed_ms=3927
+2026-09-13 15:33:09,182 INFO app.main Liquid inbound completed sender=***3040 guid=2B2D43BB-C084-4972-BA24-2B1B20134104 acknowledged=False elapsed_ms=5528

@@ -6,6 +6,7 @@ import sys
 
 import uvicorn
 
+from app.channels.messages_db import MessagesDatabase
 from app.config import get_settings
 
 
@@ -18,6 +19,18 @@ def reply_policy_ok() -> bool:
         f"reply policy: senders={sender} destination={destination or '(any)'} "
         f"group_chats={'answered' if settings.bb_allow_group_chats else 'ignored'}"
     )
+    if destination and destination != "*":
+        exact = MessagesDatabase(settings.messages_db_path).available()
+        print(
+            "destination check: "
+            + (
+                "exact (per-message alias from Messages' chat.db)"
+                if exact
+                else "APPROXIMATE (chat-level alias only). iMessage merges a contact's texts to "
+                "your number and your email into one thread, so texts to the Liquid address can "
+                "be refused. Grant Full Disk Access to Terminal, then restart."
+            )
+        )
     if not destination:
         print(
             "refusing to start: BB_ALLOWED_DESTINATION is blank, so Liquid would ignore every "

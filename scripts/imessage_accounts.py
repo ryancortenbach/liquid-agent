@@ -23,6 +23,7 @@ from pathlib import Path
 import httpx
 
 from app.channels.imessage_bluebubbles import GROUP_CHAT_STYLE
+from app.channels.messages_db import MessagesDatabase
 from app.channels.seller_router import WILDCARD_ALLOWLIST, canonical_handle, parse_handle_allowlist
 from app.config import get_settings
 from app.envfile import update_env_file
@@ -114,6 +115,8 @@ async def dry_run(settings, limit: int) -> None:
     if not settings.bb_password:
         print("--recent needs BB_PASSWORD (run scripts/configure_bluebubbles_local.py)")
         return
+    candidate = MessagesDatabase(settings.messages_db_path)
+    messages_db = candidate if candidate.available() else None
     messages = await recent_messages(settings.bb_server_url, settings.bb_password, limit)
     print(f"\nlast {len(messages)} messages on this Mac, judged by the current .env:")
     for message in messages:
@@ -124,6 +127,9 @@ async def dry_run(settings, limit: int) -> None:
         chat = (message.get("chats") or [{}])[0]
         sender = ((message.get("handle") or {}).get("address")) or "?"
         destination = chat.get("lastAddressedHandle")
+        if messages_db is not None:
+            exact = messages_db.destination_for_guid(str(message.get("guid") or ""))
+            destination = exact or destination
         is_group = chat.get("style") == GROUP_CHAT_STYLE or ";+;" in str(chat.get("guid") or "")
         text = (message.get("text") or "").replace("\n", " ")[:32]
         verdict = would_answer(settings, sender=sender, destination=destination, is_group=is_group)
@@ -188,6 +194,20 @@ async def main(argv: list[str]) -> int:
             tally = Counter()
 
     aliases = {alias for alias, _ in tally if alias}
+    messages_db = MessagesDatabase(settings.messages_db_path)
+    exact_counts: list[tuple[str, int]] = []
+    if messages_db.available():
+        exact_counts = messages_db.inbound_alias_counts()
+        aliases |= {alias for alias, _ in exact_counts if alias}
+        print("addresses people actually text this Mac at (from Messages' chat.db, exact):")
+        for alias, count in exact_counts[:10]:
+            shown = mask(alias) if alias else "(unknown)"
+            print(f"  {shown:<22} {kind_of(alias) if alias else '?':<6} {count:>5} inbound texts")
+    else:
+        print(
+            "Messages' chat.db is not readable from this terminal, so Liquid can only see the "
+            "chat-level alias (approximate). Grant Full Disk Access to Terminal for exact matching."
+        )
     if tally:
         print(f"iMessage aliases this Mac replies from (source: {source}):")
         by_alias: dict[str, dict[str, int]] = {}

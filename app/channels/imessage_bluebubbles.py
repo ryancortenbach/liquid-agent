@@ -2,16 +2,32 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import UTC, datetime
-from time import monotonic
-from urllib.parse import quote
 from pathlib import Path
+from time import monotonic
 from typing import Any
+from urllib.parse import quote
 from uuid import uuid4
 
 import httpx
 
 from app.channels.base import InboundAttachment, InboundMessage
+
+
+def plain_dashes(text: str) -> str:
+    """Strip em and en dashes from anything Liquid sends to a seller.
+
+    The chat model writes them unprompted, so filter at the one place every
+    outgoing message passes through rather than trusting a prompt to comply.
+    A dash used as a parenthetical becomes a comma; a numeric range keeps a
+    plain hyphen.
+    """
+    cleaned = re.sub(r"\s*[\u2014\u2013]\s*", ", ", text)
+    cleaned = re.sub(r"(?<=\d), (?=\d)", "-", cleaned)
+    cleaned = re.sub(r",\s*,", ",", cleaned)
+    cleaned = re.sub(r",\s*([.!?])", r"\1", cleaned)
+    return cleaned.strip()
 
 
 def inbound_fingerprint(message: InboundMessage) -> str:
@@ -166,7 +182,7 @@ class BlueBubblesAdapter:
             json={
                 "chatGuid": chat_guid,
                 "tempGuid": idempotency_key or str(uuid4()),
-                "message": text,
+                "message": plain_dashes(text),
                 "method": "apple-script",
             },
         )

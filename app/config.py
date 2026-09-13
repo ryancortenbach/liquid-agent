@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     # allowed, and BB_ALLOWED_DESTINATION is always required (the webhook refuses everything
     # without it).
     bb_allow_group_chats: bool = False
+    # Messages' own database, read-only, for the exact alias each inbound text was sent to.
+    messages_db_enabled: bool = True
+    messages_db_path: str = "~/Library/Messages/chat.db"
     seller_handle: str | None = None
     require_ebay_onboarding: bool = True
     ebay_demo_mode: bool = False

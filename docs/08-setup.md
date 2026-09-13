@@ -43,8 +43,15 @@ seller approves it. The original is always kept.
    the webhook ignores everything. Before opening the line to testers, run
    `uv run python scripts/imessage_accounts.py --recent 20`: it replays the last twenty real
    messages on the Mac against the current `.env` and prints, per message, whether Liquid would
-   answer and why not. (BlueBubbles webhooks omit the addressed alias, so Liquid looks each chat
-   up over the server's REST API; the dry run uses the same data.)
+   answer and why not.
+   How the check works: iMessage keeps one thread per contact, so a friend who texts the owner's
+   number and then the Liquid email lands in the same chat, and the chat-level alias BlueBubbles
+   reports cannot tell those texts apart. Messages' own database records the alias per message,
+   so Liquid reads it directly from `~/Library/Messages/chat.db` when the terminal running Liquid
+   has Full Disk Access (System Settings > Privacy & Security > Full Disk Access > Terminal).
+   Without that, Liquid falls back to the chat-level alias and the runner says so at startup.
+   `BB_ALLOWED_DESTINATION=*` skips the destination check entirely and relies on the
+   `SELLER_HANDLE` allowlist alone; only use it with an explicit list of tester numbers.
 5. Start Liquid with `uv run python scripts/run_local.py`. This runner disables access logging so
    the webhook secret is not written into request logs.
 6. Register the authenticated local inbound webhook with

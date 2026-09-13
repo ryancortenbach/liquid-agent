@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
 import logging
 import secrets
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from typing import Annotated
@@ -27,8 +27,10 @@ from sqlalchemy import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
+from app.channels.base import InboundMessage
 from app.channels.chat_ai import ChatInterpreter, OpenAIChatInterpreter
 from app.channels.imessage_bluebubbles import BlueBubblesAdapter, inbound_fingerprint
+from app.channels.messages_db import MessagesDatabase
 from app.channels.seller_router import SellerMessageRouter, canonical_handle
 from app.clock import Clock, DemoClock, RealClock, SimClock, utc_now
 from app.config import Mode, Settings, get_settings
@@ -194,6 +196,35 @@ ClockDep = Annotated[Clock, Depends(get_clock)]
 ItemLocksDep = Annotated[ItemLocks, Depends(get_item_locks)]
 
 
+async def resolve_destination(
+    app: FastAPI, adapter: BlueBubblesAdapter, message: InboundMessage
+) -> tuple[str | None, str]:
+    """Which of our iMessage aliases this message was sent to, and where that answer came from.
+
+    Messages' own database records it per message (destination_caller_id); that is exact and
+    needs Full Disk Access. The webhook and the REST chat lookup only know the chat-level
+    lastAddressedHandle, which iMessage shares across a contact's merged thread.
+    """
+    messages_db: MessagesDatabase | None = getattr(app.state, "messages_db", None)
+    if messages_db is not None:
+        try:
+            exact = messages_db.destination_for_guid(message.guid)
+        except Exception as exc:
+            log.warning("chat.db lookup failed (%s); falling back", type(exc).__name__)
+        else:
+            if exact:
+                return exact, "chat.db"
+    if message.destination_handle:
+        return message.destination_handle, "webhook"
+    try:
+        return await adapter.chat_destination(message.chat_guid), "rest"
+    except Exception as exc:  # server down or auth failure: refuse rather than guess
+        log.warning(
+            "Liquid inbound refused reason=destination_lookup_failed error=%s", type(exc).__name__
+        )
+        return None, "failed"
+
+
 def create_app(
     settings: Settings | None = None,
     *,
@@ -211,6 +242,21 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.settings = app_settings
+        app.state.messages_db = None
+        if app_settings.messages_db_enabled:
+            candidate = MessagesDatabase(app_settings.messages_db_path)
+            if candidate.available():
+                app.state.messages_db = candidate
+        destination_setting = (app_settings.bb_allowed_destination or "").strip()
+        if destination_setting and destination_setting != "*":
+            log.info(
+                "iMessage destination check: %s",
+                "exact per-message alias from Messages' chat.db"
+                if app.state.messages_db is not None
+                else "chat-level alias via BlueBubbles (approximate; iMessage merges a "
+                "contact's texts to your number and your email into one thread, so grant Full "
+                "Disk Access to the terminal running Liquid for exact matching)",
+            )
         app.state.engine = make_engine(app_settings.database_url)
         create_db_and_tables(app.state.engine)
         app.state.clock = build_clock(app_settings)
@@ -671,29 +717,22 @@ def create_app(
         if message.is_group and not app_settings.bb_allow_group_chats:
             log.info("Liquid inbound ignored sender=%s reason=group_chat", sender_label)
             return {"status": "ignored", "reason": "group_chat"}
-        if not message.destination_handle:
-            # BlueBubbles serializes new-message webhooks in notification mode, which omits
-            # chat.lastAddressedHandle, so ask the server which of our aliases this chat uses.
-            try:
-                resolved = await adapter.chat_destination(message.chat_guid)
-            except Exception as exc:  # server down or auth failure: refuse rather than guess
-                log.warning(
-                    "Liquid inbound refused sender=%s reason=destination_lookup_failed error=%s",
-                    sender_label,
-                    type(exc).__name__,
-                )
+        # "*" accepts any destination and leaves the sender allowlist as the only control.
+        if allowed_destination != "*":
+            destination, source = await resolve_destination(request.app, adapter, message)
+            if source == "failed":
                 return {"status": "ignored", "reason": "destination_lookup_failed"}
-            message = replace(message, destination_handle=resolved)
-        if canonical_handle(message.destination_handle or "") != canonical_handle(
-            allowed_destination
-        ):
-            seen = message.destination_handle or "(missing)"
-            log.info(
-                "Liquid inbound ignored sender=%s reason=wrong_destination addressed_to=%s",
-                sender_label,
-                seen if seen == "(missing)" else f"***{seen[-6:]}",
-            )
-            return {"status": "ignored", "reason": "wrong_destination"}
+            message = replace(message, destination_handle=destination)
+            if canonical_handle(destination or "") != canonical_handle(allowed_destination):
+                seen = destination or "(missing)"
+                log.info(
+                    "Liquid inbound ignored sender=%s reason=wrong_destination addressed_to=%s "
+                    "source=%s",
+                    sender_label,
+                    seen if seen == "(missing)" else f"***{seen[-6:]}",
+                    source,
+                )
+                return {"status": "ignored", "reason": "wrong_destination"}
         if not router.accepts(message):
             log.warning("Liquid inbound ignored sender=%s reason=sender_not_allowed", sender_label)
             return {"status": "ignored", "reason": "sender_not_allowed"}
