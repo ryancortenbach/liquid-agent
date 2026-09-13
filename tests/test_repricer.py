@@ -117,3 +117,60 @@ def test_reprice_follows_schedule_and_updates_ebay(tmp_path: Path) -> None:
             ).all()
             assert len(reprices) == 2 and reprices[0].price_before == list_price
             assert session.exec(select(ListingPack)).one().price_cents == second["price_after"]
+
+
+def test_reprice_once_applies_to_every_active_item(tmp_path: Path) -> None:
+    import asyncio
+
+    from app.pricing.loop import active_item_ids, reprice_once
+
+    app = create_app(
+        Settings(
+            mode=Mode.SIM,
+            database_url="sqlite:///:memory:",
+            photo_storage_dir=str(tmp_path / "photos"),
+            handoff_dir=str(tmp_path / "handoff"),
+            research_mode="fixture",
+            reprice_loop=False,
+        )
+    )
+    with TestClient(app) as client:
+        item_id = client.post(
+            "/api/items",
+            json={
+                "seller_handle": "+14155550123",
+                "title": "iPad Air 5th gen 64GB",
+                "brand": "Apple",
+                "market_value_cents": 30_000,
+                "sigma_cents": 3_500,
+                "floor_cents": 22_000,
+                "deadline_hours": 72,
+            },
+        ).json()["item_id"]
+        client.post(f"/api/items/{item_id}/details", json={"text": "good, 3 days, facebook only"})
+        client.post(f"/api/items/{item_id}/plan-listing", json={"research": True})
+        client.post(f"/api/items/{item_id}/go")  # facebook handoff -> active pack, no eBay
+        assert active_item_ids(app.state.engine) == [item_id]
+        client.post("/api/clock/skip", json={"hours": 30})
+        outcomes = asyncio.run(
+            reprice_once(
+                engine=app.state.engine,
+                clock=app.state.clock,
+                settings=app_settings_for(app),
+                item_locks=app.state.item_locks,
+                ebay_publisher=None,
+                adapter=None,
+            )
+        )
+        assert len(outcomes) == 1 and outcomes[0].applied and outcomes[0].ebay_updated is False
+
+
+def app_settings_for(app) -> Settings:
+    from app.config import Settings as _Settings
+
+    return _Settings(
+        mode=Mode.SIM,
+        database_url="sqlite:///:memory:",
+        research_mode="fixture",
+        tick_seconds=0.01,
+    )

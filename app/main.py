@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import secrets
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -68,6 +69,7 @@ from app.photos.pipeline import (
     enhance_product_photo,
 )
 from app.photos.storage import MAX_PHOTO_BYTES, PhotoStorage
+from app.pricing.loop import reprice_loop
 from app.pricing.repricer import reprice_item
 from app.research.factory import build_comps_sources
 from app.web.dashboard import router as dashboard_router
@@ -256,7 +258,24 @@ def create_app(
             app.state.seller_router = PipelineRouter(
                 app.state.seller_router, app.state.listing_flow
             )
+        app.state.reprice_stop = asyncio.Event()
+        app.state.reprice_task = None
+        if app_settings.reprice_loop:
+            app.state.reprice_task = asyncio.create_task(
+                reprice_loop(
+                    engine=app.state.engine,
+                    clock=app.state.clock,
+                    settings=app_settings,
+                    item_locks=app.state.item_locks,
+                    ebay_publisher=app.state.ebay_publisher,
+                    adapter=app.state.message_adapter,
+                    stop=app.state.reprice_stop,
+                )
+            )
         yield
+        app.state.reprice_stop.set()
+        if app.state.reprice_task is not None:
+            await app.state.reprice_task
         if app.state.owns_message_adapter and app.state.message_adapter is not None:
             await app.state.message_adapter.close()
         if app.state.owns_ebay_publisher and app.state.ebay_publisher is not None:

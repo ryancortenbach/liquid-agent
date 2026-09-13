@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     apify_token: str | None = None
     research_mode: str = "auto"  # auto | fixture | off
     handoff_dir: str = "data/handoff"
+    reprice_loop: bool = False
     openai_api_key: str | None = None
     openai_image_model: str = "gpt-image-2.5-sunburst"
     openai_image_quality: str = "high"
