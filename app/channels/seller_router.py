@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import mimetypes
 import re
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -112,22 +113,29 @@ class SellerMessageRouter:
         storage: PhotoStorage,
         seller_handle: str,
         timezone: str,
+        ebay_authorization_url: Callable[[str], str] | None = None,
     ) -> None:
         self.engine = engine
         self.clock = clock
         self.adapter = adapter
         self.editor = editor
         self.storage = storage
-        self.seller_handle = canonical_handle(seller_handle)
+        self.seller_handle = (
+            None if seller_handle.strip() == "*" else canonical_handle(seller_handle)
+        )
         self.timezone = timezone
+        self.ebay_authorization_url = ebay_authorization_url
 
     def accepts(self, message: InboundMessage) -> bool:
-        return canonical_handle(message.handle) == self.seller_handle
+        return self.seller_handle is None or canonical_handle(message.handle) == self.seller_handle
 
     async def route(self, message: InboundMessage) -> None:
         if not self.accepts(message):
             return
         lowered = message.text.strip().lower()
+        if lowered == "connect ebay":
+            await self._connect_ebay(message)
+            return
         if lowered in APPROVE_WORDS:
             await self._review_pending(message, approved=True)
             return
@@ -147,6 +155,24 @@ class SellerMessageRouter:
                 "sell by Sunday 6pm, do not go under $170. You can also reply STATUS."
             ),
             f"{message.guid}:help",
+        )
+
+    async def _connect_ebay(self, message: InboundMessage) -> None:
+        if self.ebay_authorization_url is None:
+            response = "eBay connection is not configured yet."
+        else:
+            with Session(self.engine) as session:
+                conversation = self._get_or_create_conversation(session, message)
+                seller_id = conversation.seller_id
+                session.commit()
+            response = (
+                "Open this secure link and approve access on eBay. "
+                f"The link expires in 10 minutes: {self.ebay_authorization_url(seller_id)}"
+            )
+        await self.adapter.send_text(
+            message.chat_guid,
+            response,
+            f"{message.guid}:connect-ebay",
         )
 
     def _get_or_create_conversation(

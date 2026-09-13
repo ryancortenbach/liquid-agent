@@ -191,5 +191,5 @@ def test_openai_editor_sends_truth_prompt_and_writes_png(tmp_path: Path) -> None
     assert calls[0]["model"] == "gpt-image-2.5-sunburst"
     assert calls[0]["quality"] == "high"
     assert calls[0]["output_format"] == "png"
-    assert calls[0]["response_format"] == "b64_json"
+    assert "response_format" not in calls[0]
     assert calls[0]["prompt"] == "preserve every visible defect"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from time import monotonic
 from typing import Any, Protocol
 from urllib.parse import quote
 
@@ -58,31 +59,35 @@ class EbayRepricer(Protocol):
     ) -> None: ...
 
 
-class EbaySandboxClient:
-    api_base_url = "https://api.sandbox.ebay.com"
-    token_url = "https://api.sandbox.ebay.com/identity/v1/oauth2/token"
-
+class EbayClient:
     def __init__(
         self,
         client_id: str,
         client_secret: str,
         refresh_token: str,
         *,
+        environment: str = "production",
         client: httpx.AsyncClient | None = None,
     ) -> None:
+        if environment not in {"sandbox", "production"}:
+            raise ValueError("environment must be sandbox or production")
         self.client_id = client_id
         self.client_secret = client_secret
         self.refresh_token = refresh_token
+        host = "api.sandbox.ebay.com" if environment == "sandbox" else "api.ebay.com"
+        self.api_base_url = f"https://{host}"
+        self.token_url = f"https://{host}/identity/v1/oauth2/token"
         self._client = client or httpx.AsyncClient(timeout=30)
         self._owns_client = client is None
         self._access_token: str | None = None
+        self._access_token_expires_at = 0.0
 
     async def close(self) -> None:
         if self._owns_client:
             await self._client.aclose()
 
     async def _get_access_token(self) -> str:
-        if self._access_token:
+        if self._access_token and monotonic() < self._access_token_expires_at:
             return self._access_token
         response = await self._client.post(
             self.token_url,
@@ -99,6 +104,9 @@ class EbaySandboxClient:
         if not isinstance(token, str) or not token:
             raise EbayError("eBay authorization response did not contain an access token")
         self._access_token = token
+        expires_in = response.json().get("expires_in", 7200)
+        lifetime = expires_in if isinstance(expires_in, int) else 7200
+        self._access_token_expires_at = monotonic() + max(lifetime - 60, 0)
         return token
 
     async def _request(
@@ -225,3 +233,21 @@ class EbaySandboxClient:
             if isinstance(status, int) and status >= 400:
                 errors = entry.get("errors") or [{}]
                 raise EbayError(str(errors[0].get("message") or f"price update failed ({status})"))
+
+
+class EbaySandboxClient(EbayClient):
+    def __init__(
+        self,
+        client_id: str,
+        client_secret: str,
+        refresh_token: str,
+        *,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        super().__init__(
+            client_id,
+            client_secret,
+            refresh_token,
+            environment="sandbox",
+            client=client,
+        )

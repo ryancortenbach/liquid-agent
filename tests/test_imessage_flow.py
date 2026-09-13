@@ -84,6 +84,14 @@ class FakeMessageAdapter(BlueBubblesAdapter):
         self.sent_images.append(path)
 
 
+class FakeEbayConnectionService:
+    def authorization_url(self, seller_id: str) -> str:
+        return f"https://auth.sandbox.ebay.com/oauth2/authorize?seller={seller_id}"
+
+    def publisher_for(self, _seller_id: str):
+        return None
+
+
 def test_imessage_photo_preview_approval_and_deduplication(tmp_path: Path) -> None:
     adapter = FakeMessageAdapter()
     app = create_app(
@@ -171,3 +179,56 @@ def test_imessage_webhook_rejects_bad_secret_and_other_senders(tmp_path: Path) -
         )
         assert other_sender.status_code == 202
         assert other_sender.json() == {"status": "ignored", "reason": "sender_not_allowed"}
+
+
+def test_imessage_connect_ebay_returns_seller_specific_link(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    app = create_app(
+        Settings(
+            mode=Mode.SIM,
+            database_url="sqlite:///:memory:",
+            photo_storage_dir=str(tmp_path),
+            bb_webhook_secret="webhook-secret",
+            seller_handle="+14155550123",
+        ),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+        ebay_connection_service=FakeEbayConnectionService(),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/webhooks/bluebubbles?secret=webhook-secret",
+            json=message_payload(guid="connect-1", text="CONNECT EBAY"),
+        )
+
+        assert response.json()["status"] == "queued"
+        assert adapter.sent_texts[-1].startswith("Open this secure link")
+        assert "auth.sandbox.ebay.com" in adapter.sent_texts[-1]
+
+
+def test_wildcard_seller_handle_accepts_multiple_sellers(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    app = create_app(
+        Settings(
+            mode=Mode.SIM,
+            database_url="sqlite:///:memory:",
+            photo_storage_dir=str(tmp_path),
+            bb_webhook_secret="webhook-secret",
+            seller_handle="*",
+        ),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+    )
+
+    with TestClient(app) as client:
+        for index, handle in enumerate(("+14155550123", "+14155550456"), start=1):
+            response = client.post(
+                "/webhooks/bluebubbles?secret=webhook-secret",
+                json=message_payload(guid=f"seller-{index}", text="STATUS", handle=handle),
+            )
+            assert response.json()["status"] == "queued"
+        assert adapter.sent_texts == [
+            "No active item. Send a product photo to start.",
+            "No active item. Send a product photo to start.",
+        ]

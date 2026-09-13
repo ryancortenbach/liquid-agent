@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     tz: str = "America/Los_Angeles"
     database_url: str = "sqlite:///data/liquid.db"
     photo_storage_dir: str = "data/photos"
+    app_secret: str | None = None
 
     anthropic_api_key: str | None = None
     claude_model: str = "claude-opus-5"
@@ -40,6 +41,8 @@ class Settings(BaseSettings):
     seller_handle: str | None = None
     ebay_client_id: str | None = None
     ebay_client_secret: str | None = None
+    ebay_runame: str | None = None
+    ebay_environment: str = "sandbox"
     ebay_sb_client_id: str | None = None
     ebay_sb_client_secret: str | None = None
     ebay_sb_runame: str | None = None
@@ -61,6 +64,14 @@ class Settings(BaseSettings):
     def valid_timezone(cls, value: str) -> str:
         ZoneInfo(value)
         return value
+
+    @field_validator("ebay_environment")
+    @classmethod
+    def valid_ebay_environment(cls, value: str) -> str:
+        normalized = value.lower()
+        if normalized not in {"sandbox", "production"}:
+            raise ValueError("eBay environment must be sandbox or production")
+        return normalized
 
 
 @lru_cache

@@ -16,7 +16,7 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import Engine
 from sqlmodel import Session, select
@@ -39,9 +39,11 @@ from app.ledger import write_decision
 from app.listing.draft import polish_with_claude
 from app.market import publish_service
 from app.market.ebay import (
+    EbayError,
     EbayPublisher,
     EbaySandboxClient,
 )
+from app.market.ebay_oauth import EbayConnectionService, EbayOAuthClient
 from app.market.fees import instant_quote_cents
 from app.market.publish_service import EbayPublishError
 from app.models import (
@@ -55,6 +57,7 @@ from app.models import (
     PhotoStatus,
     ProductPhoto,
     Seller,
+    SellerConversation,
     WebhookReceipt,
 )
 from app.photos.editor import (
@@ -181,6 +184,7 @@ def create_app(
     photo_editor: ProductPhotoEditor | None = None,
     message_adapter: BlueBubblesAdapter | None = None,
     ebay_publisher: EbayPublisher | None = None,
+    ebay_connection_service: EbayConnectionService | None = None,
 ) -> FastAPI:
     app_settings = settings or get_settings()
 
@@ -207,6 +211,37 @@ def create_app(
                 app_settings.bb_password,
             )
             app.state.owns_message_adapter = True
+        app.state.ebay_connections = ebay_connection_service
+        app.state.owns_ebay_connections = False
+        ebay_client_id = (
+            app_settings.ebay_sb_client_id
+            if app_settings.ebay_environment == "sandbox"
+            else app_settings.ebay_client_id
+        )
+        ebay_client_secret = (
+            app_settings.ebay_sb_client_secret
+            if app_settings.ebay_environment == "sandbox"
+            else app_settings.ebay_client_secret
+        )
+        ebay_runame = (
+            app_settings.ebay_sb_runame
+            if app_settings.ebay_environment == "sandbox"
+            else app_settings.ebay_runame
+        )
+        if app.state.ebay_connections is None and all(
+            (ebay_client_id, ebay_client_secret, ebay_runame, app_settings.app_secret)
+        ):
+            app.state.ebay_connections = EbayConnectionService(
+                engine=app.state.engine,
+                oauth=EbayOAuthClient(
+                    ebay_client_id or "",
+                    ebay_client_secret or "",
+                    ebay_runame or "",
+                    environment=app_settings.ebay_environment,
+                ),
+                app_secret=app_settings.app_secret or "",
+            )
+            app.state.owns_ebay_connections = True
         app.state.seller_router = None
         if app.state.message_adapter is not None and app_settings.seller_handle:
             app.state.seller_router = SellerMessageRouter(
@@ -217,6 +252,11 @@ def create_app(
                 storage=app.state.photo_storage,
                 seller_handle=app_settings.seller_handle,
                 timezone=app_settings.tz,
+                ebay_authorization_url=(
+                    app.state.ebay_connections.authorization_url
+                    if app.state.ebay_connections is not None
+                    else None
+                ),
             )
         app.state.ebay_publisher = ebay_publisher
         app.state.owns_ebay_publisher = False
@@ -252,6 +292,11 @@ def create_app(
             comps_sources=app.state.comps_sources,
             adapter=app.state.message_adapter,
             ebay_publisher=app.state.ebay_publisher,
+            ebay_publisher_for_seller=(
+                app.state.ebay_connections.publisher_for
+                if app.state.ebay_connections is not None
+                else None
+            ),
             polish=polish,
         )
         if app.state.seller_router is not None:
@@ -280,6 +325,8 @@ def create_app(
             await app.state.message_adapter.close()
         if app.state.owns_ebay_publisher and app.state.ebay_publisher is not None:
             await app.state.ebay_publisher.close()
+        if app.state.owns_ebay_connections and app.state.ebay_connections is not None:
+            await app.state.ebay_connections.close()
 
     app = FastAPI(title="Liquid", version="0.1.0", lifespan=lifespan)
     app.include_router(dashboard_router)
@@ -287,6 +334,42 @@ def create_app(
     @app.get("/health")
     def health(clock: ClockDep) -> dict:
         return {"status": "ok", "mode": app_settings.mode, "sim_at": clock.now()}
+
+    @app.get("/oauth/ebay/callback", response_class=HTMLResponse)
+    async def ebay_oauth_callback(
+        request: Request,
+        state: str | None = None,
+        code: str | None = None,
+        error: str | None = None,
+    ) -> HTMLResponse:
+        service: EbayConnectionService | None = request.app.state.ebay_connections
+        if service is None:
+            raise HTTPException(status_code=503, detail="eBay OAuth is not configured")
+        if error:
+            raise HTTPException(status_code=400, detail=f"eBay authorization was declined: {error}")
+        if not state or not code:
+            raise HTTPException(status_code=400, detail="eBay callback is missing state or code")
+        try:
+            connection = await service.complete(state, code)
+        except (ValueError, EbayError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        adapter: BlueBubblesAdapter | None = request.app.state.message_adapter
+        if adapter is not None:
+            with Session(request.app.state.engine) as session:
+                conversation = session.exec(
+                    select(SellerConversation).where(
+                        SellerConversation.seller_id == connection.seller_id
+                    )
+                ).first()
+            if conversation is not None:
+                await adapter.send_text(
+                    conversation.chat_guid,
+                    "eBay connected. I can prepare listings for your approval now.",
+                    f"ebay-connected:{connection.id}:{connection.updated_at.isoformat()}",
+                )
+        return HTMLResponse(
+            "<h1>eBay connected</h1><p>You can close this page and return to Messages.</p>"
+        )
 
     async def process_bluebubbles_message(message) -> None:
         router: SellerMessageRouter = app.state.seller_router
@@ -459,6 +542,11 @@ def create_app(
                 engine=engine,
                 settings=app_settings,
                 publisher=request.app.state.ebay_publisher,
+                publisher_for_seller=(
+                    request.app.state.ebay_connections.publisher_for
+                    if request.app.state.ebay_connections is not None
+                    else None
+                ),
                 clock=clock,
                 item_id=item_id,
                 seller_approved=body.seller_approved,

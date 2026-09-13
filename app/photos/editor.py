@@ -114,7 +114,6 @@ class OpenAIProductPhotoEditor:
                 quality=self.quality,
                 size=self.size,
                 output_format="png",
-                response_format="b64_json",
             )
         if not result.data or not result.data[0].b64_json:
             raise RuntimeError("OpenAI returned no edited image")

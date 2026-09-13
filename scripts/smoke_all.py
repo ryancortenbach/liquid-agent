@@ -67,6 +67,35 @@ async def run(live: bool) -> int:
         )
     )
 
+    oauth_values = {
+        "APP_SECRET": settings.app_secret,
+        "eBay client id": (
+            settings.ebay_sb_client_id
+            if settings.ebay_environment == "sandbox"
+            else settings.ebay_client_id
+        ),
+        "eBay client secret": (
+            settings.ebay_sb_client_secret
+            if settings.ebay_environment == "sandbox"
+            else settings.ebay_client_secret
+        ),
+        "eBay RuName": (
+            settings.ebay_sb_runame
+            if settings.ebay_environment == "sandbox"
+            else settings.ebay_runame
+        ),
+    }
+    oauth_missing = [name for name, value in oauth_values.items() if not configured(value)]
+    results.append(
+        (
+            "eBay seller OAuth",
+            "READY" if not oauth_missing else "MISSING",
+            f"{settings.ebay_environment} credentials present"
+            if not oauth_missing
+            else ", ".join(oauth_missing),
+        )
+    )
+
     checks = [
         ("OpenAI image editing", settings.openai_api_key, "OPENAI_API_KEY"),
         ("eBay Browse", settings.ebay_client_id and settings.ebay_client_secret, "eBay keys"),

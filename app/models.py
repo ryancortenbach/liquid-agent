@@ -89,6 +89,16 @@ class Seller(SQLModel, table=True):
     )
 
 
+class EbayConnection(SQLModel, table=True):
+    id: str = Field(default_factory=new_id, primary_key=True)
+    seller_id: str = Field(foreign_key="seller.id", index=True, unique=True)
+    environment: str
+    encrypted_refresh_token: str
+    scopes_json: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    connected_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+
+
 class SellerConversation(SQLModel, table=True):
     id: str = Field(default_factory=new_id, primary_key=True)
     seller_id: str = Field(foreign_key="seller.id", index=True, unique=True)

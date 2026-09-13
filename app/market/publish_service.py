@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -48,6 +49,7 @@ async def publish_item_to_ebay(
     engine: Engine,
     settings: Settings,
     publisher: EbayPublisher | None,
+    publisher_for_seller: Callable[[str], EbayPublisher | None] | None = None,
     clock: Clock,
     item_id: str,
     seller_approved: bool,
@@ -61,8 +63,15 @@ async def publish_item_to_ebay(
 
     Raises EbayPublishError with an HTTP-style status code so callers can map it.
     """
+    with Session(engine) as session:
+        owner = session.get(Item, item_id)
+        if owner is None:
+            raise EbayPublishError(404, "item not found")
+        seller_id = owner.seller_id
+    if publisher_for_seller is not None:
+        publisher = publisher_for_seller(seller_id) or publisher
     if publisher is None:
-        raise EbayPublishError(503, "eBay sandbox is not configured")
+        raise EbayPublishError(503, "connect eBay before publishing")
     required_settings = {
         "merchant location": settings.ebay_sb_merchant_location_key,
         "payment policy": settings.ebay_sb_payment_policy_id,

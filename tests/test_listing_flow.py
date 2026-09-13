@@ -158,7 +158,7 @@ def test_imessage_onboarding_to_listing_pack_without_ebay_sandbox(tmp_path: Path
         final = adapter.sent_texts
         assert any(text.startswith("facebook marketplace, paste") for text in final)
         assert any(text.startswith("offerup, paste") for text in final)
-        assert "ebay: eBay sandbox is not configured" in final[-1]
+        assert "ebay: connect eBay before publishing" in final[-1]
         assert "paste the messages above" in final[-1]
 
         with Session(app.state.engine) as session:

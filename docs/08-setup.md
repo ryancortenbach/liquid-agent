@@ -36,7 +36,25 @@ The generated image remains in `review` until the seller approves it. The origin
 7. Text a photo and caption from `SELLER_HANDLE`. Liquid accepts messages only from that handle.
 8. Confirm the original and enhanced photos arrive, then reply `APPROVE` or `REJECT`.
 
+Keep a specific `SELLER_HANDLE` during local testing. Set it to `*` only when intentionally opening
+the bot to multiple sellers. Each sender receives a separate seller, conversation, item, and eBay
+connection record.
+
 ## 4. eBay
+
+Create Sandbox or Production application keys in the eBay Developers Program. Configure the
+application's Accept URL as `PUBLIC_BASE_URL/oauth/ebay/callback` and save the RuName that eBay
+assigns to it.
+
+For Sandbox, set `EBAY_ENVIRONMENT=sandbox`, `EBAY_SB_CLIENT_ID`, `EBAY_SB_CLIENT_SECRET`, and
+`EBAY_SB_RUNAME`. For Production, set `EBAY_ENVIRONMENT=production`, `EBAY_CLIENT_ID`,
+`EBAY_CLIENT_SECRET`, and `EBAY_RUNAME`. Set `APP_SECRET` to at least 32 random characters. Never
+commit any of these values.
+
+The authorization request asks only for the base, Inventory, and Account scopes. The seller signs
+in on eBay and grants access. Liquid exchanges the one-time code, encrypts the refresh token at
+rest, and associates it with the seller record. Sellers initiate the flow by texting
+`CONNECT EBAY`.
 
 1. Create developer sandbox and production keysets at `developer.ebay.com`.
 2. Create an eBay sandbox test user and redirect URL.

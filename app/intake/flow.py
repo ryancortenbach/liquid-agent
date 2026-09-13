@@ -101,6 +101,7 @@ class ListingFlow:
         comps_sources: list[CompsSource],
         adapter: ChannelAdapter | None = None,
         ebay_publisher: EbayPublisher | None = None,
+        ebay_publisher_for_seller: Callable[[str], EbayPublisher | None] | None = None,
         polish: Callable[[ListingDraft], ListingDraft] | None = None,
     ) -> None:
         self.engine = engine
@@ -109,6 +110,7 @@ class ListingFlow:
         self.comps_sources = comps_sources
         self.adapter = adapter
         self.ebay_publisher = ebay_publisher
+        self.ebay_publisher_for_seller = ebay_publisher_for_seller
         self.polish = polish
 
     # ---------- storage helpers ----------
@@ -472,6 +474,7 @@ class ListingFlow:
                         engine=self.engine,
                         settings=self.settings,
                         publisher=self.ebay_publisher,
+                        publisher_for_seller=self.ebay_publisher_for_seller,
                         clock=self.clock,
                         item_id=item_id,
                         seller_approved=True,
