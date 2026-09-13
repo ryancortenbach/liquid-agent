@@ -17,11 +17,13 @@ Updated 2026-09-13.
   rejection, and status flow
 - Multi-angle photo groups for one item and multi-item batch intake with numbered corrections
 - Single-photo inventory detection, per-object crops, seller checklist, removal, and audit source
+- Required first-message eBay onboarding with photo blocking, retry, decline, and callback recovery
+- Seller recovery commands for status, resume, back, help, and safe draft reset
 - eBay sandbox inventory, reusable offer draft, and seller-approved publication flow
 - SQLite sale claims that pause duplicates and support confirmed or failed marketplace closes
 - Deadline pricing engine, guard, ledger, outbox, simulation, and evaluation artifacts
 - FastAPI item, photo enhancement, photo review, file, planning, tick, and ledger endpoints
-- 85 passing unit, API, property, clock, simulation, sale-claim, photo, iMessage, and eBay tests
+- 88 passing unit, API, property, clock, simulation, sale-claim, photo, iMessage, and eBay tests
 
 ## Ordered P0 queue
 

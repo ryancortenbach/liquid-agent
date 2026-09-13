@@ -28,6 +28,7 @@ from app.ledger import write_decision
 from app.models import (
     ConditionGrade,
     ConversationStatus,
+    EbayConnection,
     Item,
     ItemStatus,
     PhotoRole,
@@ -44,11 +45,31 @@ from app.photos.storage import PhotoStorage
 APPROVE_WORDS = {"approve", "approved", "yes", "use it", "looks good"}
 REJECT_WORDS = {"reject", "no", "do not use", "don't use it"}
 BATCH_PATTERN = re.compile(r"^(?:batch|multiple items?)\b", flags=re.IGNORECASE)
+START_OVER_WORDS = {"start over", "restart", "reset", "new item"}
+BACK_WORDS = {"back", "go back", "undo"}
+RESUME_WORDS = {"resume", "continue", "what next", "where were we"}
+HELP_WORDS = {"help", "commands", "menu"}
+EBAY_RETRY_WORDS = {
+    "connect ebay",
+    "retry",
+    "retry ebay",
+    "try again",
+    "new link",
+    "send link",
+}
+EBAY_CHECK_WORDS = {"connected", "done", "ebay status", "check ebay", "status"}
+EBAY_SKIP_WORDS = {"cancel", "skip", "not now", "later", "never mind", "nevermind"}
 TERMINAL_ITEM_STATUSES = {
     ItemStatus.SOLD,
     ItemStatus.DONE,
     ItemStatus.EXPIRED,
     ItemStatus.CANCELLED,
+}
+CANCELLABLE_DRAFT_STATUSES = {
+    ItemStatus.DRAFT,
+    ItemStatus.IDENTIFIED,
+    ItemStatus.PRICED,
+    ItemStatus.ESCALATED,
 }
 
 
@@ -143,6 +164,7 @@ class SellerMessageRouter:
         seller_handle: str,
         timezone: str,
         ebay_authorization_url: Callable[[str], str] | None = None,
+        require_ebay_onboarding: bool = True,
         identifier: Identifier | None = None,
         reviewer: PhotoTruthReviewer | None = None,
     ) -> None:
@@ -156,6 +178,7 @@ class SellerMessageRouter:
         )
         self.timezone = timezone
         self.ebay_authorization_url = ebay_authorization_url
+        self.require_ebay_onboarding = require_ebay_onboarding
         self.identifier = identifier
         self.reviewer = reviewer
 
@@ -164,6 +187,10 @@ class SellerMessageRouter:
 
     async def route(self, message: InboundMessage) -> None:
         if not self.accepts(message):
+            return
+        if await self.ensure_ebay_onboarding(message):
+            return
+        if not message.attachments and await self.handle_control(message):
             return
         lowered = message.text.strip().lower()
         if lowered == "connect ebay":
@@ -192,6 +219,146 @@ class SellerMessageRouter:
             ),
             f"{message.guid}:help",
         )
+
+    async def ensure_ebay_onboarding(self, message: InboundMessage) -> bool:
+        """Block every seller action until that seller has connected an eBay account."""
+        if not self.require_ebay_onboarding:
+            return False
+
+        with Session(self.engine) as session:
+            conversation = self._get_or_create_conversation(session, message)
+            connected = session.exec(
+                select(EbayConnection).where(EbayConnection.seller_id == conversation.seller_id)
+            ).first()
+            if connected is not None:
+                if conversation.status == ConversationStatus.AWAITING_EBAY:
+                    conversation.status = ConversationStatus.READY
+                    conversation.updated_at = self.clock.now()
+                    session.add(conversation)
+                    session.commit()
+                return False
+            first_prompt = conversation.status != ConversationStatus.AWAITING_EBAY
+            conversation.status = ConversationStatus.AWAITING_EBAY
+            seller_id = conversation.seller_id
+            session.add(conversation)
+            session.commit()
+
+        lowered = message.text.strip().lower()
+        if self.ebay_authorization_url is None:
+            response = (
+                "Welcome to Liquid. Connecting an eBay seller account is required before you "
+                "can use the agent. eBay setup is temporarily unavailable, so no photos or "
+                "listing details were processed. Please try again later."
+            )
+        else:
+            link = self.ebay_authorization_url(seller_id)
+            if lowered in EBAY_SKIP_WORDS:
+                response = (
+                    "An eBay seller account is required, so onboarding cannot be skipped. "
+                    f"Connect here: {link} If the link fails or expires, reply RETRY."
+                )
+            elif lowered in EBAY_CHECK_WORDS and not first_prompt:
+                response = (
+                    "I do not see a completed eBay connection yet. Finish approval here: "
+                    f"{link} Then return to Messages. If it fails or expires, reply RETRY."
+                )
+            elif lowered in EBAY_RETRY_WORDS and not first_prompt:
+                response = (
+                    "Here is a fresh eBay connection link. It expires in 10 minutes: "
+                    f"{link} If eBay shows an error, return here and reply RETRY again."
+                )
+            elif message.attachments:
+                response = (
+                    "I cannot process that photo until eBay onboarding is complete. I did not "
+                    f"create a listing. Connect here: {link} Then resend the photo."
+                )
+            else:
+                response = (
+                    "Welcome to Liquid. First, connect your eBay seller account. This is required "
+                    "before I can process photos or create listings. Open this secure link and "
+                    f"approve access: {link} The link expires in 10 minutes. If it fails or "
+                    "expires, reply RETRY."
+                )
+        await self.adapter.send_text(
+            message.chat_guid,
+            response,
+            f"{message.guid}:ebay-onboarding",
+        )
+        return True
+
+    async def handle_control(self, message: InboundMessage) -> bool:
+        lowered = message.text.strip().lower()
+        if lowered not in START_OVER_WORDS | BACK_WORDS | RESUME_WORDS | HELP_WORDS:
+            return False
+
+        if lowered in HELP_WORDS:
+            response = (
+                "Commands: STATUS shows progress. RESUME repeats the next step. BACK explains "
+                "how to revise the current step. START OVER cancels the current draft."
+            )
+        elif lowered in START_OVER_WORDS:
+            with Session(self.engine) as session:
+                conversation = session.exec(
+                    select(SellerConversation).where(SellerConversation.handle == message.handle)
+                ).first()
+                if conversation is None:
+                    response = "There is no active draft. Send a product photo to start."
+                else:
+                    active_item = (
+                        session.get(Item, conversation.active_item_id)
+                        if conversation.active_item_id
+                        else None
+                    )
+                    item_ids = set(
+                        active_item.constraints_json.get("batch_item_ids") or []
+                        if active_item is not None
+                        else []
+                    )
+                    if active_item is not None:
+                        item_ids.add(active_item.id)
+                    for item_id in item_ids:
+                        item = session.get(Item, item_id)
+                        if item is not None and item.status in CANCELLABLE_DRAFT_STATUSES:
+                            item.status = ItemStatus.CANCELLED
+                            session.add(item)
+                    conversation.active_item_id = None
+                    conversation.pending_photo_id = None
+                    conversation.status = ConversationStatus.READY
+                    conversation.updated_at = self.clock.now()
+                    session.add(conversation)
+                    session.commit()
+                    response = "Started over. Send one or more product photos when you are ready."
+        elif lowered in RESUME_WORDS:
+            response = self._status_response(message.handle, include_next_step=True)
+        else:
+            response = self._back_response(message.handle)
+
+        await self.adapter.send_text(message.chat_guid, response, f"{message.guid}:control")
+        return True
+
+    def _back_response(self, handle: str) -> str:
+        with Session(self.engine) as session:
+            conversation = session.exec(
+                select(SellerConversation).where(SellerConversation.handle == handle)
+            ).first()
+            if conversation is None or conversation.active_item_id is None:
+                return "There is no earlier step. Send a product photo to start."
+            status = conversation.status
+        if status == ConversationStatus.AWAITING_IDENTITY:
+            return "Reply with the correct item name, or reply START OVER and resend the photo."
+        if status == ConversationStatus.AWAITING_PHOTO_REVIEW:
+            return "Reply REJECT to keep the originals, or START OVER to resend the photos."
+        if status == ConversationStatus.AWAITING_DETAILS:
+            return "Send the corrected condition, included parts, timing, floor, or marketplace."
+        if status == ConversationStatus.AWAITING_CONFIRMATION:
+            return "Tell me what to change, such as 'floor 250', '1 day', or 'eBay only'."
+        if status in {ConversationStatus.PROCESSING_PHOTO, ConversationStatus.RESEARCHING}:
+            return "That step is still processing. Reply RESUME in a moment to check it."
+        if status == ConversationStatus.PUBLISHING:
+            return "Publishing is already in progress and cannot be rolled back here."
+        if status == ConversationStatus.LISTED:
+            return "This item is already listed. Reply START OVER to begin a new draft."
+        return "There is no earlier step. Send a product photo to start."
 
     async def _connect_ebay(self, message: InboundMessage) -> None:
         if self.ebay_authorization_url is None:
@@ -963,23 +1130,44 @@ class SellerMessageRouter:
         )
 
     async def _send_status(self, message: InboundMessage) -> None:
-        with Session(self.engine) as session:
-            conversation = session.exec(
-                select(SellerConversation).where(SellerConversation.handle == message.handle)
-            ).first()
-            if conversation is None or conversation.active_item_id is None:
-                response = "No active item. Send a product photo to start."
-            else:
-                item = session.get(Item, conversation.active_item_id)
-                if item is None:
-                    response = "No active item. Send a product photo to start."
-                else:
-                    response = (
-                        f"{item.title}: {item.status.value}. "
-                        f"Photo step: {conversation.status.value}."
-                    )
+        response = self._status_response(message.handle)
         await self.adapter.send_text(
             message.chat_guid,
             response,
             f"{message.guid}:status",
         )
+
+    def _status_response(self, handle: str, *, include_next_step: bool = False) -> str:
+        with Session(self.engine) as session:
+            conversation = session.exec(
+                select(SellerConversation).where(SellerConversation.handle == handle)
+            ).first()
+            if conversation is None or conversation.active_item_id is None:
+                return "No active item. Send a product photo to start."
+            else:
+                item = session.get(Item, conversation.active_item_id)
+                if item is None:
+                    return "No active item. Send a product photo to start."
+                response = (
+                    f"{item.title}: {item.status.value}. "
+                    f"Current step: {conversation.status.value}."
+                )
+                if include_next_step:
+                    next_steps = {
+                        ConversationStatus.PROCESSING_PHOTO: "Wait for photo processing to finish.",
+                        ConversationStatus.AWAITING_IDENTITY: (
+                            "Confirm the detected item or send the correct name."
+                        ),
+                        ConversationStatus.AWAITING_PHOTO_REVIEW: "Reply APPROVE or REJECT.",
+                        ConversationStatus.AWAITING_DETAILS: "Answer the last listing question.",
+                        ConversationStatus.RESEARCHING: "Wait while I build the listing plan.",
+                        ConversationStatus.AWAITING_CONFIRMATION: (
+                            "Reply GO to publish or tell me what to change."
+                        ),
+                        ConversationStatus.PUBLISHING: "Wait for publishing to finish.",
+                        ConversationStatus.LISTED: "Send another photo to list a new item.",
+                    }
+                    next_step = next_steps.get(conversation.status)
+                    if next_step:
+                        response = f"{response} {next_step}"
+                return response

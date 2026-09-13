@@ -100,6 +100,7 @@ def make_settings(tmp_path: Path, **overrides) -> Settings:
         bb_password="secret",
         bb_webhook_secret="webhook-secret",
         seller_handle=SELLER,
+        require_ebay_onboarding=False,
         openai_api_key=None,
     )
     base.update(overrides)

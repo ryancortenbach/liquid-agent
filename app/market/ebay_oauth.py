@@ -162,6 +162,9 @@ class EbayConnectionService:
     def authorization_url(self, seller_id: str) -> str:
         return self.oauth.authorization_url(self.signer.dumps(seller_id))
 
+    def seller_id_for_state(self, state: str) -> str:
+        return self.signer.loads(state)
+
     async def complete(self, state: str, code: str) -> EbayConnection:
         seller_id = self.signer.loads(state)
         tokens = await self.oauth.exchange_code(code)

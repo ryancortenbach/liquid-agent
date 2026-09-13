@@ -66,16 +66,18 @@ commit any of these values.
 
 The authorization request asks only for the base, Inventory, and Account scopes. The seller signs
 in on eBay and grants access. Liquid exchanges the one-time code, encrypts the refresh token at
-rest, and associates it with the seller record. Sellers initiate the flow by texting
-`CONNECT EBAY`.
+rest, and associates it with the seller record. Keep `REQUIRE_EBAY_ONBOARDING=true`. On the first
+text from a new seller, Liquid sends the authorization link and blocks photos and listing work
+until the callback succeeds. The seller can text `RETRY` for a fresh link if the link expires,
+authorization is declined, or eBay returns an error. Onboarding cannot be skipped.
 
 1. Create developer sandbox and production keysets at `developer.ebay.com`.
 2. Create an eBay sandbox test user and redirect URL.
 3. Create a sandbox inventory location and note its merchant location key.
 4. Opt the sandbox seller into business policies, then create payment, return, and fulfillment
    policies.
-5. Add the client id, client secret, RuName, refresh token, location key, and three policy ids to
-   `.env`.
+5. Add the client id, client secret, RuName, location key, and three policy ids to `.env`. The
+   per-seller refresh token is created by the onboarding callback and is not pasted into `.env`.
 6. Set `PUBLIC_BASE_URL` to public HTTPS so eBay can fetch approved listing images.
 7. Prepare a draft with `POST /api/items/{item_id}/publish/ebay` and
    `{"seller_approved": false, "aspects": {"Brand": ["Sony"]}}`.

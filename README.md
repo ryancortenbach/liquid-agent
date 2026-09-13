@@ -86,10 +86,14 @@ The eBay sandbox path is `POST /api/items/{item_id}/publish/ebay`. It creates a 
 photos first. The offer is published only when the request explicitly includes
 `"seller_approved": true`, and Liquid marks it live only after eBay returns a listing id.
 
+At any point in Messages, `STATUS` reports progress, `RESUME` repeats the next step, `BACK`
+explains how to revise the current step, and `START OVER` cancels the active draft safely.
+
 For seller OAuth, configure the eBay application credentials, RuName, and `APP_SECRET`. A seller
-can then text `CONNECT EBAY`, sign in on eBay, and approve access. Liquid stores only an encrypted
+is automatically placed into eBay onboarding on their first text. Until they sign in on eBay and
+approve access, Liquid does not process photos or create listings. Liquid stores only an encrypted
 refresh token for that seller and resolves their connection when publishing. The OAuth link expires
-after 10 minutes.
+after 10 minutes, and the seller can text `RETRY` for a fresh link.
 
 ## Submission
 

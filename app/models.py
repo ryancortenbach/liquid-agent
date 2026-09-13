@@ -69,6 +69,7 @@ class PhotoStatus(StrEnum):
 
 
 class ConversationStatus(StrEnum):
+    AWAITING_EBAY = "awaiting_ebay"
     READY = "ready"
     PROCESSING_PHOTO = "processing_photo"
     AWAITING_IDENTITY = "awaiting_identity"

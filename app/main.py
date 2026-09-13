@@ -48,6 +48,7 @@ from app.market.ebay_oauth import EbayConnectionService, EbayOAuthClient
 from app.market.fees import instant_quote_cents
 from app.market.publish_service import EbayPublishError
 from app.models import (
+    ConversationStatus,
     Item,
     ItemStatus,
     LedgerEvent,
@@ -281,6 +282,7 @@ def create_app(
                     if app.state.ebay_connections is not None
                     else None
                 ),
+                require_ebay_onboarding=app_settings.require_ebay_onboarding,
                 identifier=app.state.identifier,
                 reviewer=app.state.photo_reviewer,
             )
@@ -372,27 +374,75 @@ def create_app(
         if service is None:
             raise HTTPException(status_code=503, detail="eBay OAuth is not configured")
         if error:
-            raise HTTPException(status_code=400, detail=f"eBay authorization was declined: {error}")
+            if state:
+                try:
+                    seller_id = service.seller_id_for_state(state)
+                except ValueError:
+                    seller_id = None
+                if seller_id:
+                    adapter: BlueBubblesAdapter | None = request.app.state.message_adapter
+                    with Session(request.app.state.engine) as session:
+                        conversation = session.exec(
+                            select(SellerConversation).where(
+                                SellerConversation.seller_id == seller_id
+                            )
+                        ).first()
+                    if adapter is not None and conversation is not None:
+                        await adapter.send_text(
+                            conversation.chat_guid,
+                            "eBay was not connected. Reply RETRY for a fresh link.",
+                            f"ebay-declined:{seller_id}:{state[-16:]}",
+                        )
+            return HTMLResponse(
+                "<h1>eBay was not connected</h1>"
+                "<p>Return to Messages and reply RETRY for a fresh link.</p>",
+                status_code=400,
+            )
         if not state or not code:
             raise HTTPException(status_code=400, detail="eBay callback is missing state or code")
         try:
-            connection = await service.complete(state, code)
-        except (ValueError, EbayError) as exc:
+            seller_id = service.seller_id_for_state(state)
+        except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        adapter: BlueBubblesAdapter | None = request.app.state.message_adapter
-        if adapter is not None:
+        try:
+            connection = await service.complete(state, code)
+        except (ValueError, EbayError):
+            adapter: BlueBubblesAdapter | None = request.app.state.message_adapter
             with Session(request.app.state.engine) as session:
                 conversation = session.exec(
-                    select(SellerConversation).where(
-                        SellerConversation.seller_id == connection.seller_id
-                    )
+                    select(SellerConversation).where(SellerConversation.seller_id == seller_id)
                 ).first()
-            if conversation is not None:
+            if adapter is not None and conversation is not None:
                 await adapter.send_text(
                     conversation.chat_guid,
-                    "eBay connected. I can prepare listings for your approval now.",
-                    f"ebay-connected:{connection.id}:{connection.updated_at.isoformat()}",
+                    "eBay connection failed. Reply RETRY for a fresh link.",
+                    f"ebay-failed:{seller_id}:{state[-16:]}",
                 )
+            return HTMLResponse(
+                "<h1>eBay connection failed</h1>"
+                "<p>Return to Messages and reply RETRY for a fresh link.</p>",
+                status_code=400,
+            )
+        adapter: BlueBubblesAdapter | None = request.app.state.message_adapter
+        chat_guid: str | None = None
+        with Session(request.app.state.engine) as session:
+            conversation = session.exec(
+                select(SellerConversation).where(
+                    SellerConversation.seller_id == connection.seller_id
+                )
+            ).first()
+            if conversation is not None:
+                chat_guid = conversation.chat_guid
+                conversation.status = ConversationStatus.READY
+                conversation.updated_at = utc_now()
+                session.add(conversation)
+                session.commit()
+        if adapter is not None and chat_guid is not None:
+            await adapter.send_text(
+                chat_guid,
+                "eBay connected. Setup is complete. Send one or more product photos to start.",
+                f"ebay-connected:{connection.id}:{connection.updated_at.isoformat()}",
+            )
         return HTMLResponse(
             "<h1>eBay connected</h1><p>You can close this page and return to Messages.</p>"
         )

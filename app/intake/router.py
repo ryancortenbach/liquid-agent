@@ -18,6 +18,10 @@ class PipelineRouter:
     async def route(self, message: InboundMessage) -> None:
         if not self.accepts(message):
             return
+        if await self.base.ensure_ebay_onboarding(message):
+            return
+        if not message.attachments and await self.base.handle_control(message):
+            return
         if not message.attachments and message.text.strip().lower() == "connect ebay":
             await self.base.route(message)
             return
