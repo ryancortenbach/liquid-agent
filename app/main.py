@@ -417,7 +417,7 @@ def create_app(
                     if adapter is not None and conversation is not None:
                         await adapter.send_text(
                             conversation.chat_guid,
-                            "eBay was not connected. Reply RETRY for a fresh link.",
+                            "ebay didn't connect. reply retry for a new link.",
                             f"ebay-declined:{seller_id}:{state[-16:]}",
                         )
             return HTMLResponse(
@@ -442,7 +442,7 @@ def create_app(
             if adapter is not None and conversation is not None:
                 await adapter.send_text(
                     conversation.chat_guid,
-                    "eBay connection failed. Reply RETRY for a fresh link.",
+                    "ebay connect failed. reply retry for a new link.",
                     f"ebay-failed:{seller_id}:{state[-16:]}",
                 )
             return HTMLResponse(
@@ -467,7 +467,7 @@ def create_app(
         if adapter is not None and chat_guid is not None:
             await adapter.send_text(
                 chat_guid,
-                "eBay connected. Setup is complete. Send one or more product photos to start.",
+                "ebay connected. send a photo whenever you're ready.",
                 f"ebay-connected:{connection.id}:{connection.updated_at.isoformat()}",
             )
         return HTMLResponse(

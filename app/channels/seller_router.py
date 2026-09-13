@@ -213,9 +213,7 @@ class SellerMessageRouter:
         await self.adapter.send_text(
             message.chat_guid,
             (
-                "Send one or more product photos with a message like: Sony WH-1000XM5 "
-                "headphones, sell by Sunday 6pm, do not go under $170. Start with BATCH for "
-                "multiple items. You can also reply STATUS."
+                "send me a photo of what you're selling and i'll take it from there."
             ),
             f"{message.guid}:help",
         )
@@ -245,40 +243,19 @@ class SellerMessageRouter:
 
         lowered = message.text.strip().lower()
         if self.ebay_authorization_url is None:
-            response = (
-                "Welcome to Liquid. Connecting an eBay seller account is required before you "
-                "can use the agent. eBay setup is temporarily unavailable, so no photos or "
-                "listing details were processed. Please try again later."
-            )
+            response = "ebay connect isn't set up on my end yet. try again in a bit."
         else:
             link = self.ebay_authorization_url(seller_id)
             if lowered in EBAY_SKIP_WORDS:
-                response = (
-                    "An eBay seller account is required, so onboarding cannot be skipped. "
-                    f"Connect here: {link} If the link fails or expires, reply RETRY."
-                )
+                response = f"can't skip this one, ebay's where it gets listed: {link}"
             elif lowered in EBAY_CHECK_WORDS and not first_prompt:
-                response = (
-                    "I do not see a completed eBay connection yet. Finish approval here: "
-                    f"{link} Then return to Messages. If it fails or expires, reply RETRY."
-                )
+                response = f"not connected yet. finish here: {link}"
             elif lowered in EBAY_RETRY_WORDS and not first_prompt:
-                response = (
-                    "Here is a fresh eBay connection link. It expires in 10 minutes: "
-                    f"{link} If eBay shows an error, return here and reply RETRY again."
-                )
+                response = f"fresh link (10 min): {link}"
             elif message.attachments:
-                response = (
-                    "I cannot process that photo until eBay onboarding is complete. I did not "
-                    f"create a listing. Connect here: {link} Then resend the photo."
-                )
+                response = f"hold that photo one sec. connect your ebay first, then resend: {link}"
             else:
-                response = (
-                    "Welcome to Liquid. First, connect your eBay seller account. This is required "
-                    "before I can process photos or create listings. Open this secure link and "
-                    f"approve access: {link} The link expires in 10 minutes. If it fails or "
-                    "expires, reply RETRY."
-                )
+                response = f"hey! first, connect your ebay so i can post for you (10 min): {link}"
         await self.adapter.send_text(
             message.chat_guid,
             response,
@@ -292,17 +269,14 @@ class SellerMessageRouter:
             return False
 
         if lowered in HELP_WORDS:
-            response = (
-                "Commands: STATUS shows progress. RESUME repeats the next step. BACK explains "
-                "how to revise the current step. START OVER cancels the current draft."
-            )
+            response = "status · resume · back · start over"
         elif lowered in START_OVER_WORDS:
             with Session(self.engine) as session:
                 conversation = session.exec(
                     select(SellerConversation).where(SellerConversation.handle == message.handle)
                 ).first()
                 if conversation is None:
-                    response = "There is no active draft. Send a product photo to start."
+                    response = "nothing in progress. send a photo to start."
                 else:
                     active_item = (
                         session.get(Item, conversation.active_item_id)
@@ -327,7 +301,7 @@ class SellerMessageRouter:
                     conversation.updated_at = self.clock.now()
                     session.add(conversation)
                     session.commit()
-                    response = "Started over. Send one or more product photos when you are ready."
+                    response = "fresh start. send a photo whenever."
         elif lowered in RESUME_WORDS:
             response = self._status_response(message.handle, include_next_step=True)
         else:
@@ -342,36 +316,33 @@ class SellerMessageRouter:
                 select(SellerConversation).where(SellerConversation.handle == handle)
             ).first()
             if conversation is None or conversation.active_item_id is None:
-                return "There is no earlier step. Send a product photo to start."
+                return "nothing to go back to. send a photo to start."
             status = conversation.status
         if status == ConversationStatus.AWAITING_IDENTITY:
-            return "Reply with the correct item name, or reply START OVER and resend the photo."
+            return "just tell me what it is, or say start over."
         if status == ConversationStatus.AWAITING_PHOTO_REVIEW:
-            return "Reply REJECT to keep the originals, or START OVER to resend the photos."
+            return "say no to keep your original, or start over."
         if status == ConversationStatus.AWAITING_DETAILS:
-            return "Send the corrected condition, included parts, timing, floor, or marketplace."
+            return "just send the corrected answer."
         if status == ConversationStatus.AWAITING_CONFIRMATION:
-            return "Tell me what to change, such as 'floor 250', '1 day', or 'eBay only'."
+            return "tell me what to change (floor 250, 1 day, ebay only)."
         if status in {ConversationStatus.PROCESSING_PHOTO, ConversationStatus.RESEARCHING}:
-            return "That step is still processing. Reply RESUME in a moment to check it."
+            return "still working on it, give me a sec."
         if status == ConversationStatus.PUBLISHING:
-            return "Publishing is already in progress and cannot be rolled back here."
+            return "it's posting right now, can't undo that here."
         if status == ConversationStatus.LISTED:
-            return "This item is already listed. Reply START OVER to begin a new draft."
-        return "There is no earlier step. Send a product photo to start."
+            return "that one's already listed. say start over for a new one."
+        return "nothing to go back to. send a photo to start."
 
     async def _connect_ebay(self, message: InboundMessage) -> None:
         if self.ebay_authorization_url is None:
-            response = "eBay connection is not configured yet."
+            response = "ebay connect isn't set up yet."
         else:
             with Session(self.engine) as session:
                 conversation = self._get_or_create_conversation(session, message)
                 seller_id = conversation.seller_id
                 session.commit()
-            response = (
-                "Open this secure link and approve access on eBay. "
-                f"The link expires in 10 minutes: {self.ebay_authorization_url(seller_id)}"
-            )
+            response = f"connect ebay here (10 min link): {self.ebay_authorization_url(seller_id)}"
         await self.adapter.send_text(
             message.chat_guid,
             response,
@@ -477,7 +448,7 @@ class SellerMessageRouter:
         if not attachments:
             await self.adapter.send_text(
                 message.chat_guid,
-                "Please send a HEIC, JPEG, PNG, or WebP product photo.",
+                "send that as a regular photo (jpeg, png, or heic).",
                 f"{message.guid}:unsupported",
             )
             return
@@ -590,13 +561,13 @@ class SellerMessageRouter:
                     for index, identity in enumerate(identities, start=1)
                 )
                 question = (
-                    f"I found {len(identities)} items:\n{summary}\n"
-                    "Reply YES if all are right, or say something like '2 is Bose QC45'."
+                    f"{len(identities)} items:\n{summary}\n"
+                    "all right? (yes, or fix one like '2 is Bose QC45')"
                 )
             else:
                 question = identities[0].question()
                 if len(media) > 1:
-                    question += f"\nI will use all {len(media)} photos as angles of this item."
+                    question += f"\n(using all {len(media)} photos)"
             await self.adapter.send_text(message.chat_guid, question, f"{message.guid}:identify")
             return
 
@@ -709,9 +680,8 @@ class SellerMessageRouter:
                 for index, identity in enumerate(identities, start=1)
             )
             question = (
-                f"I found {len(identities)} sellable items in that photo:\n{summary}\n"
-                "Reply YES if that is everything. You can say 'REMOVE 3' or "
-                "'2 is Bose QC45'. If I missed something, send a closer photo of it."
+                f"i see {len(identities)} things to sell:\n{summary}\n"
+                "that everything? (yes, 'remove 3', or '2 is Bose QC45')"
             )
         await self.adapter.send_text(message.chat_guid, question, f"{message.guid}:inventory")
 
@@ -794,14 +764,12 @@ class SellerMessageRouter:
                             f"{index}. {value.title}"
                             for index, value in enumerate(remaining, start=1)
                         )
-                        repeat_text = f"Removed.\n{summary}\nReply YES if that is everything."
+                        repeat_text = f"removed.\n{summary}\nthat everything?"
                     else:
                         conversation.active_item_id = None
                         conversation.status = ConversationStatus.READY
                         batch_items = []
-                        repeat_text = (
-                            "Removed every item. Send another photo whenever you are ready."
-                        )
+                        repeat_text = "removed everything. send another photo whenever."
                 elif correction and 1 <= int(correction.group(1)) <= len(batch_items):
                     corrected = batch_items[int(correction.group(1)) - 1]
                     corrected.title = correction.group(2).strip()[:120]
@@ -812,12 +780,9 @@ class SellerMessageRouter:
                         f"{index}. {value.title}"
                         for index, value in enumerate(batch_items, start=1)
                     )
-                    repeat_text = f"Updated.\n{summary}\nReply YES if all are right."
+                    repeat_text = f"updated.\n{summary}\nall right?"
                 else:
-                    repeat_text = (
-                        "Reply YES if every item is right, or correct one like "
-                        "'2 is Bose QC45'."
-                    )
+                    repeat_text = "yes if they're all right, or fix one like '2 is Bose QC45'."
             elif len(batch_items) == 1:
                 identity = ItemIdentity.model_validate(item.constraints_json.get("identity") or {})
                 kind, title = interpret_confirmation(message.text, identity)
@@ -911,7 +876,7 @@ class SellerMessageRouter:
                 session.commit()
         await self.adapter.send_text(
             message.chat_guid,
-            "I could not process that photo. Try sending it again as a normal photo.",
+            "couldn't read that photo, try sending it again as a regular photo.",
             f"{message.guid}:failed",
         )
 
@@ -955,9 +920,7 @@ class SellerMessageRouter:
         await self.adapter.send_text(
             message.chat_guid,
             (
-                "got the photo. photo cleanup is off right now, so i'll list with your original."
-                if len(jobs) == 1
-                else f"got {len(jobs)} photos. photo cleanup is off, so I kept every original."
+                "got it." if len(jobs) == 1 else f"got {len(jobs)} photos."
             ),
             f"{message.guid}:original-only",
         )
@@ -973,7 +936,7 @@ class SellerMessageRouter:
             return
         await self.adapter.send_text(
             message.chat_guid,
-            f"Got {len(jobs)} photos. I am preparing truthful listing versions now.",
+            "got it, one sec." if len(jobs) == 1 else f"got {len(jobs)} photos, one sec.",
             f"{message.guid}:processing",
         )
         results = []
@@ -1003,7 +966,7 @@ class SellerMessageRouter:
                     session.commit()
             await self.adapter.send_text(
                 message.chat_guid,
-                "I could not enhance those photos. Try sending them again as normal photos.",
+                "couldn't process that photo, try sending it again.",
                 f"{message.guid}:failed",
             )
             return
@@ -1030,11 +993,12 @@ class SellerMessageRouter:
             session.commit()
 
         for index, result in enumerate(results, start=1):
-            await self.adapter.send_text(
-                message.chat_guid,
-                f"Photo {index}: original, then enhanced.",
-                f"{message.guid}:pair-{index}",
-            )
+            if len(results) > 1:
+                await self.adapter.send_text(
+                    message.chat_guid,
+                    f"photo {index}: before, then after.",
+                    f"{message.guid}:pair-{index}",
+                )
             await self.adapter.send_image(
                 message.chat_guid,
                 str(self.storage.resolve(result.original.file_path)),
@@ -1045,16 +1009,13 @@ class SellerMessageRouter:
                 str(self.storage.resolve(result.enhanced.file_path)),
                 f"{message.guid}:enhanced-{index}",
             )
-        failed_note = f" {failed} could not be processed." if failed else ""
+        failed_note = f" ({failed} didn't work.)" if failed else ""
         await self.adapter.send_text(
             message.chat_guid,
             (
-                "Original first, then the enhanced version. Reply APPROVE or REJECT."
+                "cleaned it up (before, then after). use the new one? yes/no"
                 if len(results) == 1 and not failed
-                else (
-                    f"Those are {len(results)} original and enhanced pairs.{failed_note} "
-                    "Reply APPROVE or REJECT for all enhanced photos."
-                )
+                else f"cleaned them up.{failed_note} use the new ones? yes/no"
             ),
             f"{message.guid}:preview-label",
         )
@@ -1079,7 +1040,7 @@ class SellerMessageRouter:
             ]
             if not review_photos:
                 session.commit()
-                response = "There is no enhanced photo waiting for review."
+                response = "nothing to review right now."
             else:
                 item_ids: set[str] = set()
                 for photo in review_photos:
@@ -1115,19 +1076,14 @@ class SellerMessageRouter:
                 conversation.status = ConversationStatus.AWAITING_DETAILS
                 session.add(conversation)
                 session.commit()
-                response = (
-                    (
-                        f"Approved {len(review_photos)} enhanced photos across "
-                        f"{len(item_ids)} items. Every original stays in its listing set."
-                    )
-                    if approved
-                    else f"Rejected {len(review_photos)} enhanced photos. I kept every original."
-                )
-        await self.adapter.send_text(
-            message.chat_guid,
-            response,
-            f"{message.guid}:review-response",
-        )
+                # An approval needs no acknowledgment: the listing questions follow immediately.
+                response = "" if approved else "ok, keeping your original."
+        if response:
+            await self.adapter.send_text(
+                message.chat_guid,
+                response,
+                f"{message.guid}:review-response",
+            )
 
     async def _send_status(self, message: InboundMessage) -> None:
         response = self._status_response(message.handle)
@@ -1143,31 +1099,20 @@ class SellerMessageRouter:
                 select(SellerConversation).where(SellerConversation.handle == handle)
             ).first()
             if conversation is None or conversation.active_item_id is None:
-                return "No active item. Send a product photo to start."
+                return "nothing in progress. send a photo to start."
             else:
                 item = session.get(Item, conversation.active_item_id)
                 if item is None:
-                    return "No active item. Send a product photo to start."
-                response = (
-                    f"{item.title}: {item.status.value}. "
-                    f"Current step: {conversation.status.value}."
-                )
-                if include_next_step:
-                    next_steps = {
-                        ConversationStatus.PROCESSING_PHOTO: "Wait for photo processing to finish.",
-                        ConversationStatus.AWAITING_IDENTITY: (
-                            "Confirm the detected item or send the correct name."
-                        ),
-                        ConversationStatus.AWAITING_PHOTO_REVIEW: "Reply APPROVE or REJECT.",
-                        ConversationStatus.AWAITING_DETAILS: "Answer the last listing question.",
-                        ConversationStatus.RESEARCHING: "Wait while I build the listing plan.",
-                        ConversationStatus.AWAITING_CONFIRMATION: (
-                            "Reply GO to publish or tell me what to change."
-                        ),
-                        ConversationStatus.PUBLISHING: "Wait for publishing to finish.",
-                        ConversationStatus.LISTED: "Send another photo to list a new item.",
-                    }
-                    next_step = next_steps.get(conversation.status)
-                    if next_step:
-                        response = f"{response} {next_step}"
-                return response
+                    return "nothing in progress. send a photo to start."
+                steps = {
+                    ConversationStatus.PROCESSING_PHOTO: "working on the photo",
+                    ConversationStatus.AWAITING_IDENTITY: "waiting for you to confirm what it is",
+                    ConversationStatus.AWAITING_PHOTO_REVIEW: "waiting on yes/no for the new photo",
+                    ConversationStatus.AWAITING_DETAILS: "waiting on your last answer",
+                    ConversationStatus.RESEARCHING: "pricing it",
+                    ConversationStatus.AWAITING_CONFIRMATION: "waiting on go",
+                    ConversationStatus.PUBLISHING: "posting it",
+                    ConversationStatus.LISTED: "listed. send another photo anytime",
+                }
+                step = steps.get(conversation.status, conversation.status.value)
+                return f"{item.title}: {step}"

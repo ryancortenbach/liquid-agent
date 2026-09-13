@@ -123,20 +123,20 @@ def test_imessage_onboarding_to_listing_pack_without_ebay_sandbox(tmp_path: Path
     with TestClient(app) as client:
         send(client, "m1", "Apple iPad Air 5th gen 64GB wifi, sell by Sunday 6pm", with_photo=True)
         send(client, "m2", "APPROVE")
-        assert adapter.sent_texts[-1].startswith("two quick things")
+        assert adapter.sent_texts[-1].startswith("condition?")
 
         send(client, "m3", "2, comes with the box and charger, small scratch on the back")
-        assert adapter.sent_texts[-1].startswith("last three")
+        assert adapter.sent_texts[-1].startswith("how fast")
 
         send(client, "m4", "3 days, not under $220, both 94110, all")
         texts = adapter.sent_texts
-        assert any(text.startswith("on it.") for text in texts)
+        assert any(text.startswith("on it") for text in texts)
         card = texts[-1]
         assert card.startswith("here's the plan")
         assert "condition: good, light wear" in card
-        assert "listing on: ebay, facebook, offerup" in card
-        assert "based on 10 sold" in card and "offline sample data" in card
-        assert "sources: https://www.ebay.com/itm/" in card
+        assert "ebay + facebook + offerup" in card
+        assert "based on 10 sold" in card and "(sample data)" in card
+        assert "e.g. https://www.ebay.com/itm/" in card
         assert "floor $220" in card
 
         with Session(app.state.engine) as session:
@@ -160,7 +160,7 @@ def test_imessage_onboarding_to_listing_pack_without_ebay_sandbox(tmp_path: Path
         final = adapter.sent_texts
         assert any(text.startswith("facebook marketplace, paste") for text in final)
         assert any(text.startswith("offerup, paste") for text in final)
-        assert "ebay: connect eBay before publishing" in final[-1]
+        assert "connect eBay before publishing" in final[-1]
         assert "paste the messages above" in final[-1]
 
         with Session(app.state.engine) as session:
@@ -202,7 +202,7 @@ def test_go_publishes_to_ebay_sandbox_when_configured(tmp_path: Path) -> None:
         send(client, "m4", "week, you decide, ship, ebay only")
         assert adapter.sent_texts[-1].startswith("here's the plan")
         send(client, "m5", "go")
-        assert "listed on ebay (sandbox): https://www.sandbox.ebay.com/itm/1100001" in (
+        assert "ebay: https://www.sandbox.ebay.com/itm/1100001" in (
             adapter.sent_texts[-1]
         )
         assert publisher.offers and publisher.offers[0].condition == "USED_EXCELLENT"
@@ -261,10 +261,10 @@ def test_publishing_advances_to_next_batch_item(tmp_path: Path) -> None:
 
         send(client, "b5", "go")
         assert any(
-            "Next is item 2 of 2: Bose QC45 headphones" in text
+            "next up (2 of 2): Bose QC45 headphones" in text
             for text in adapter.sent_texts
         )
-        assert adapter.sent_texts[-1].startswith("two quick things")
+        assert adapter.sent_texts[-1].startswith("condition?")
         with Session(app.state.engine) as session:
             conversation = session.exec(select(SellerConversation)).one()
             assert conversation.active_item_id == second_id

@@ -158,7 +158,7 @@ async def reprice_item(
         elif ebay_error:
             note += f" ebay update failed: {ebay_error}."
         if any(pack.channel != "ebay" for pack in packs):
-            note += " update the facebook/offerup posts to the new price when you can."
+            note += " update your fb/offerup posts to match."
         await adapter.send_text(chat_guid, note, f"reprice:{item_id}:{target}")
     return RepriceOutcome(
         item_id,
