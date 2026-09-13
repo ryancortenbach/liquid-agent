@@ -55,7 +55,7 @@ analysis, listing copy, and seller messages.
 ```bash
 uv sync
 uv run pytest
-uv run uvicorn app.main:app --reload
+uv run python scripts/run_local.py --reload
 ```
 
 Open `http://localhost:8000/docs` for the API. `POST /api/plan` previews a liquidity

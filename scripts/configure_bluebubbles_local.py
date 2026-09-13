@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import secrets
 import sqlite3
 from pathlib import Path
@@ -38,7 +39,7 @@ def set_values(content: str, values: dict[str, str]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def run() -> int:
+def run(*, rotate_webhook_secret: bool = False) -> int:
     env_path = Path(".env")
     if not env_path.exists():
         example = Path(".env.example")
@@ -59,8 +60,12 @@ def run() -> int:
         {
             "BB_SERVER_URL": "http://localhost:1234",
             "BB_PASSWORD": read_server_password(),
-            "BB_WEBHOOK_SECRET": existing_secret or secrets.token_urlsafe(32),
-            "BB_WEBHOOK_BASE_URL": "http://localhost:8000",
+            "BB_WEBHOOK_SECRET": (
+                secrets.token_urlsafe(32)
+                if rotate_webhook_secret
+                else existing_secret or secrets.token_urlsafe(32)
+            ),
+            "BB_WEBHOOK_BASE_URL": "http://127.0.0.1:8000",
         },
     )
     env_path.write_text(updated)
@@ -69,4 +74,11 @@ def run() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(run())
+    parser = argparse.ArgumentParser(description="Configure Liquid for local BlueBubbles")
+    parser.add_argument(
+        "--rotate-webhook-secret",
+        action="store_true",
+        help="replace the webhook secret with a new random value",
+    )
+    arguments = parser.parse_args()
+    raise SystemExit(run(rotate_webhook_secret=arguments.rotate_webhook_secret))

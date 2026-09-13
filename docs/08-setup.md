@@ -29,7 +29,8 @@ The generated image remains in `review` until the seller approves it. The origin
    local server password and generate a separate webhook secret without displaying either value.
 4. Add `SELLER_HANDLE` to `.env`. Use the phone number or email of the person texting the server,
    not the iMessage account hosting BlueBubbles.
-5. Start Liquid with `uv run uvicorn app.main:app --reload`.
+5. Start Liquid with `uv run python scripts/run_local.py`. This runner disables access logging so
+   the webhook secret is not written into request logs.
 6. Register the authenticated local inbound webhook with
    `uv run python scripts/register_bluebubbles_webhook.py`.
 7. Text a photo and caption from `SELLER_HANDLE`. Liquid accepts messages only from that handle.
