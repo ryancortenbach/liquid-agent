@@ -76,6 +76,9 @@ conversation. The local runner records accepted messages with a masked sender, m
 and attachment count so failed or confusing flows can be reviewed without exposing full phone
 numbers in the logs.
 
+Set `BB_ALLOWED_DESTINATION` to the dedicated iMessage email used by Liquid. Messages addressed to
+any other phone number or email are ignored before deduplication, OpenAI processing, or replies.
+
 Attach several photos normally to use them as angles of one item. To submit several items at once,
 start the caption with `BATCH` and attach one primary photo per item. If items have several angles,
 use counts such as `BATCH 2+3`, where the first two attachments are item 1 and the next three are

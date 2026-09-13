@@ -17,6 +17,7 @@ def inbound_fingerprint(message: InboundMessage) -> str:
     payload = {
         "handle": message.handle.strip().lower(),
         "chat_guid": message.chat_guid,
+        "destination_handle": (message.destination_handle or "").strip().lower(),
         "text": " ".join(message.text.split()),
         "created_second": int(message.created_at.timestamp()),
         "attachments": sorted(
@@ -73,6 +74,7 @@ class BlueBubblesAdapter:
             guid=guid,
             handle=handle,
             chat_guid=chats[0]["guid"],
+            destination_handle=chats[0].get("lastAddressedHandle"),
             text=(data.get("text") or "").strip(),
             created_at=datetime.fromtimestamp(created_ms / 1000, tz=UTC),
             attachments=attachments,

@@ -37,6 +37,7 @@ def message_payload(
     guid: str,
     text: str,
     handle: str = "+14155550123",
+    addressed_to: str | None = None,
     with_photo: bool = False,
 ) -> dict:
     return {
@@ -47,7 +48,16 @@ def message_payload(
             "isFromMe": False,
             "dateCreated": 1_778_436_000_000,
             "handle": {"address": handle, "service": "iMessage"},
-            "chats": [{"guid": f"iMessage;-;{handle}"}],
+            "chats": [
+                {
+                    "guid": f"iMessage;-;{handle}",
+                    **(
+                        {"lastAddressedHandle": addressed_to}
+                        if addressed_to is not None
+                        else {}
+                    ),
+                }
+            ],
             "attachments": (
                 [
                     {
@@ -251,6 +261,55 @@ def test_imessage_webhook_rejects_bad_secret_and_other_senders(tmp_path: Path) -
         )
         assert other_sender.status_code == 202
         assert other_sender.json() == {"status": "ignored", "reason": "sender_not_allowed"}
+
+
+def test_imessage_only_routes_messages_addressed_to_the_agent_email(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    interpreter = FakeChatInterpreter(
+        ChatInterpretation(intent=ChatIntent.REPLY, reply="This must not be sent")
+    )
+    app = create_app(
+        Settings(
+            mode=Mode.SIM,
+            database_url="sqlite:///:memory:",
+            photo_storage_dir=str(tmp_path),
+            bb_webhook_secret="webhook-secret",
+            bb_allowed_destination="ryancortenbach77@gmail.com",
+            seller_handle="*",
+            require_ebay_onboarding=False,
+            openai_api_key=None,
+        ),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+        chat_interpreter=interpreter,
+    )
+    with TestClient(app) as client:
+        ignored = client.post(
+            "/webhooks/bluebubbles?secret=webhook-secret",
+            json=message_payload(
+                guid="destination-1",
+                text="Write a response for me",
+                addressed_to="+17027428016",
+            ),
+        )
+        assert ignored.json() == {"status": "ignored", "reason": "wrong_destination"}
+        assert adapter.sent_texts == []
+        assert interpreter.contexts == []
+        with Session(app.state.engine) as session:
+            assert session.exec(select(WebhookReceipt)).all() == []
+
+        accepted = client.post(
+            "/webhooks/bluebubbles?secret=webhook-secret",
+            json=message_payload(
+                guid="destination-2",
+                text="status",
+                addressed_to="RyanCortenbach77@GMAIL.COM",
+            ),
+        )
+        assert accepted.json() == {"status": "queued"}
+        assert adapter.sent_texts == [
+            "Nothing's in progress right now. Send me a photo whenever you're ready."
+        ]
 
 
 def test_first_message_requires_ebay_and_blocks_photos_until_connected(tmp_path: Path) -> None:

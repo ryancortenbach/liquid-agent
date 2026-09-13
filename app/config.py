@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     bb_password: str | None = None
     bb_webhook_secret: str | None = None
     bb_webhook_base_url: str = "http://127.0.0.1:8000"
+    bb_allowed_destination: str | None = None
     seller_handle: str | None = None
     require_ebay_onboarding: bool = True
     ebay_demo_mode: bool = False

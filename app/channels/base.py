@@ -17,6 +17,7 @@ class InboundMessage:
     guid: str
     handle: str
     chat_guid: str
+    destination_handle: str | None
     text: str
     created_at: datetime
     attachments: tuple[InboundAttachment, ...]

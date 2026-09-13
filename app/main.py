@@ -658,6 +658,15 @@ def create_app(
         if message is None:
             return {"status": "ignored"}
         sender_label = f"***{canonical_handle(message.handle)[-4:]}"
+        allowed_destination = app_settings.bb_allowed_destination
+        if allowed_destination and canonical_handle(message.destination_handle or "") != (
+            canonical_handle(allowed_destination)
+        ):
+            log.info(
+                "Liquid inbound ignored sender=%s reason=wrong_destination",
+                sender_label,
+            )
+            return {"status": "ignored", "reason": "wrong_destination"}
         if not router.accepts(message):
             log.warning("Liquid inbound ignored sender=%s reason=sender_not_allowed", sender_label)
             return {"status": "ignored", "reason": "sender_not_allowed"}
