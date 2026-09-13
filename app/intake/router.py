@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 
 from sqlmodel import Session, select
@@ -8,7 +9,7 @@ from app.channels.base import InboundMessage
 from app.channels.chat_ai import ChatIntent, ChatInterpreter
 from app.channels.seller_router import SellerMessageRouter
 from app.intake.details import QUESTION_SETS
-from app.intake.flow import ListingFlow
+from app.intake.flow import GO_WORDS, ListingFlow
 from app.intake.item_guard import extract_separate_item_requests, separate_items_reply
 from app.models import ConversationStatus, Item, SellerConversation
 
@@ -28,6 +29,20 @@ SMALL_TALK = {
     "howdy",
     "hiya",
 }
+
+
+CHANGE_SIGNAL = re.compile(
+    r"\$\s*\d|\b\d{2,6}\b|\b(only|floor|min(?:imum)?|not under|at least|day|days|week|month|"
+    r"ebay|facebook|fb|marketplace|offerup|craigslist|shipping|pickup|local)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def has_change_request(text: str) -> bool:
+    """True when a "go"-like message also carries a price, deadline, or channel change."""
+    if text.strip().lower().rstrip(".!") in GO_WORDS:
+        return False
+    return bool(CHANGE_SIGNAL.search(text))
 
 
 def is_small_talk(text: str) -> bool:
@@ -216,10 +231,12 @@ class PipelineRouter:
                 and context.get("conversation_status") == "awaiting_identity"
             ):
                 normalized = "yes"
-            if (
-                interpretation.intent == ChatIntent.PUBLISH
-                and context.get("conversation_status") != "awaiting_confirmation"
+            if interpretation.intent == ChatIntent.PUBLISH and (
+                context.get("conversation_status") != "awaiting_confirmation"
+                or has_change_request(message.text)
             ):
+                # "Sell it on eBay only for $300" is a change, not a bare go. Hand the
+                # seller's words to the plan parser instead of publishing the old plan.
                 normalized = interpretation.normalized_text.strip() or message.text
             message = replace(message, text=normalized)
         if not message.attachments and await self.base.handle_control(message):

@@ -24,11 +24,13 @@ def dollars(cents: int) -> str:
 def facebook_copy(draft: ListingDraft, price_cents: int, zip_code: str | None) -> str:
     return "\n".join(
         [
-            "facebook marketplace, paste into the create-listing form:",
+            "Facebook Marketplace. Paste this into the create-listing form.",
+            "",
             f"title: {draft.title}",
             f"price: {dollars(price_cents)}",
             f"condition: {FACEBOOK_CONDITION.get(draft.condition, 'Used - Good')}",
             f"location: {zip_code or 'your zip'}",
+            "",
             "description:",
             draft.description,
         ]
@@ -38,12 +40,14 @@ def facebook_copy(draft: ListingDraft, price_cents: int, zip_code: str | None) -
 def offerup_copy(draft: ListingDraft, price_cents: int, zip_code: str | None) -> str:
     return "\n".join(
         [
-            "offerup, paste into the post form:",
+            "OfferUp. Paste this into the post form.",
+            "",
             f"title: {draft.title}",
             f"price: {dollars(price_cents)}",
             "condition: "
             + FACEBOOK_CONDITION.get(draft.condition, "Used - Good").removeprefix("Used - "),
             f"location: {zip_code or 'your zip'}",
+            "",
             "description:",
             draft.description,
         ]

@@ -19,8 +19,25 @@ PLATFORM_ALIASES = {
     "craigslist": "craigslist",
 }
 ISSUE_WORDS = (
-    "scratch", "scuff", "dent", "crack", "chip", "worn", "wear", "stain", "battery", "issue",
-    "problem", "broken", "doesn't", "does not", "missing", "loose", "sticky", "fade", "tear",
+    "scratch",
+    "scuff",
+    "dent",
+    "crack",
+    "chip",
+    "worn",
+    "wear",
+    "stain",
+    "battery",
+    "issue",
+    "problem",
+    "broken",
+    "doesn't",
+    "does not",
+    "missing",
+    "loose",
+    "sticky",
+    "fade",
+    "tear",
 )
 INCLUDED_WORDS = ("box", "charger", "cable", "case", "manual", "receipt", "stand", "strap", "bag")
 
@@ -32,6 +49,7 @@ class IntakeDetails:
     issues: list[str] = field(default_factory=list)
     horizon: str | None = None
     floor_cents: int | None = None  # 0 means "you decide"
+    asking_cents: int | None = None  # seller's stated list price
     shipping: str | None = None  # ship, local, both
     zip_code: str | None = None
     platforms: list[str] | None = None
@@ -85,6 +103,26 @@ def parse_floor(text: str) -> int | None:
         r"\$\s*([0-9]{2,6}(?:\.[0-9]{1,2})?)",
     )
     for pattern in patterns:
+        match = re.search(pattern, lowered)
+        if match:
+            return int(Decimal(match.group(1)) * 100)
+    return None
+
+
+ASKING_PATTERNS = (
+    r"(?:list(?:\s+it)?\s+(?:at|for)|price(?:\s+it)?(?:\s+at)?|asking|sell(?:\s+it)?\s+for|"
+    r"want|for|at)\s*\$?\s*([0-9]{2,6}(?:\.[0-9]{1,2})?)\b",
+)
+
+
+def parse_asking(text: str) -> int | None:
+    """A stated list price such as "for $300" or "list at 250". A floor phrase is not asking."""
+    lowered = text.lower()
+    if re.search(
+        r"\b(floor|minimum|min|lowest|not under|not below|at least|no less than)\b", lowered
+    ):
+        return None
+    for pattern in ASKING_PATTERNS:
         match = re.search(pattern, lowered)
         if match:
             return int(Decimal(match.group(1)) * 100)
@@ -153,8 +191,11 @@ def merge_details(existing: IntakeDetails, text: str, *, answered_set: str) -> I
     horizon = parse_horizon(text)
     if horizon:
         details.horizon = horizon
+    asking = parse_asking(text)
+    if asking is not None:
+        details.asking_cents = asking
     floor = parse_floor(text)
-    if floor is not None:
+    if floor is not None and asking is None:
         details.floor_cents = floor
     shipping, zip_code = parse_shipping(text)
     if shipping:

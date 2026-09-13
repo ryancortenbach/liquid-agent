@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -331,6 +332,8 @@ class ListingFlow:
             now=now,
             wall_at=wall,
         )
+        if details.asking_cents:
+            schedule = self._apply_asking_price(item_id, schedule, details.asking_cents, now, wall)
         with Session(self.engine) as session:
             item = session.get(Item, item_id)
             assert item is not None
@@ -413,6 +416,48 @@ class ListingFlow:
         await self._send(chat_guid, result.card_text, f"{key}:card")
         return result
 
+    def _apply_asking_price(
+        self,
+        item_id: str,
+        schedule: PriceSchedule,
+        asking_cents: int,
+        now: datetime,
+        wall: datetime,
+    ) -> PriceSchedule:
+        """The seller named a price. List at exactly that, never mark down below the floor."""
+        floor = min(schedule.floor_cents, asking_cents)
+        steps = tuple(step for step in schedule.steps if floor <= step.price_cents < asking_cents)
+        adjusted = replace(
+            schedule, list_price_cents=asking_cents, floor_cents=floor, steps=steps
+        )
+        with Session(self.engine) as session:
+            item = session.get(Item, item_id)
+            assert item is not None
+            item.market_value_cents = asking_cents
+            item.sigma_cents = max(int(asking_cents * 0.15), 100)
+            if item.floor_cents > asking_cents:
+                item.floor_cents = floor
+            item.constraints_json = {
+                **item.constraints_json,
+                "market_value_source": "seller",
+                "asking_cents": asking_cents,
+            }
+            write_decision(
+                session,
+                item_id=item.id,
+                sim_at=now,
+                wall_at=wall,
+                kind="seller",
+                action="seller_price",
+                inputs={"asking_cents": asking_cents, "floor_cents": floor},
+                reason=f"seller set the list price to {asking_cents}c",
+                price_before=schedule.list_price_cents,
+                price_after=asking_cents,
+            )
+            session.add(item)
+            session.commit()
+        return adjusted
+
     @staticmethod
     def card_text(
         item: Item,
@@ -424,7 +469,9 @@ class ListingFlow:
         platforms = " + ".join(details.platforms or ["ebay"])
         lines = [
             "Here's the plan",
+            "",
             draft.title,
+            "",
             f"price: {describe_schedule(schedule)}",
             f"condition: {CONDITION_LABEL.get(details.condition or 'B', 'good')} · {platforms}",
         ]
@@ -443,7 +490,19 @@ class ListingFlow:
             urls = [source["url"] for source in research.sources_json if source.get("url")][:1]
             proof = f" e.g. {urls[0]}" if urls else ""
             lines.append(f"based on {sold}, {active}{basis}{proof}")
-        lines.append("Reply GO, or tell me what to change, like floor 250, 1 day, or eBay only.")
+        lines.append("")
+        if (
+            item.constraints_json.get("market_value_source", "placeholder") == "placeholder"
+            and not details.asking_cents
+        ):
+            lines.append(
+                "I couldn't find a real price for this one, so that number is a guess. "
+                "Tell me what to list it for, like $300, before you say GO."
+            )
+            lines.append("")
+        lines.append(
+            "Reply GO, or tell me what to change, like $300, floor 250, 1 day, or eBay only."
+        )
         return "\n".join(lines)
 
     # ---------- publishing ----------

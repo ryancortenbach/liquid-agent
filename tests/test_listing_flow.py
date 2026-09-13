@@ -196,8 +196,8 @@ def test_imessage_onboarding_to_listing_pack_without_ebay_sandbox(tmp_path: Path
 
         send(client, "m6", "go")
         final = adapter.sent_texts
-        assert any(text.startswith("facebook marketplace, paste") for text in final)
-        assert any(text.startswith("offerup, paste") for text in final)
+        assert any(text.startswith("Facebook Marketplace. Paste this") for text in final)
+        assert any(text.startswith("OfferUp. Paste this") for text in final)
         assert "connect eBay before publishing" in final[-1]
         assert "Paste the messages above" in final[-1]
 
@@ -474,3 +474,60 @@ def test_status_resends_the_live_link_after_listing(tmp_path: Path) -> None:
         send(client, "s6", "status")
         assert link in adapter.sent_texts[-1], adapter.sent_texts[-1]
         assert "ebay:" in adapter.sent_texts[-1]
+
+
+def test_change_at_confirmation_reprices_and_narrows_channels_instead_of_publishing(
+    tmp_path: Path,
+) -> None:
+    """The exact message that shipped an iPad at $26 to three channels."""
+    from app.models import ListingPack, ListingPackStatus
+
+    adapter = FakeMessageAdapter()
+    settings = make_settings(
+        tmp_path, public_base_url="https://demo.example.com", ebay_demo_mode=True
+    )
+    app = create_app(settings, photo_editor=FakePhotoEditor(), message_adapter=adapter)
+    with TestClient(app) as client:
+        send(client, "c1", "Apple iPad Air tablet", with_photo=True)
+        send(client, "c2", "approve")
+        send(client, "c3", "fair, just the item")
+        send(client, "c4", "3 days")
+        with Session(app.state.engine) as session:
+            assert session.exec(select(SellerConversation)).one().status == (
+                ConversationStatus.AWAITING_CONFIRMATION
+            )
+
+        send(client, "c5", "Sell it on EBAY only for $300")
+        card = adapter.sent_texts[-1]
+        assert "list at $300" in card, card
+        assert "ebay" in card and "facebook" not in card and "offerup" not in card, card
+        with Session(app.state.engine) as session:
+            conversation = session.exec(select(SellerConversation)).one()
+            assert conversation.status == ConversationStatus.AWAITING_CONFIRMATION
+            item = session.exec(select(Item)).one()
+            assert item.market_value_cents == 30_000
+            assert item.constraints_json["market_value_source"] == "seller"
+            assert item.status != ItemStatus.LIVE
+
+        send(client, "c6", "go")
+        with Session(app.state.engine) as session:
+            packs = session.exec(select(ListingPack)).all()
+            assert {pack.channel for pack in packs} == {"ebay"}
+            assert packs[0].status == ListingPackStatus.PUBLISHED
+            assert packs[0].price_cents == 30_000
+
+
+def test_placeholder_price_is_called_out_before_go(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    app = create_app(
+        make_settings(tmp_path, ebay_demo_mode=True),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+    )
+    with TestClient(app) as client:
+        send(client, "g1", "Apple iPad Air tablet", with_photo=True)
+        send(client, "g2", "approve")
+        send(client, "g3", "fair, just the item")
+        send(client, "g4", "3 days")
+        card = adapter.sent_texts[-1]
+        assert "that number is a guess" in card, card
