@@ -71,6 +71,12 @@ For iMessage, configure BlueBubbles and the webhook values described in `docs/08
 seller can then text a photo and caption, receive the original and enhanced versions, and reply
 `APPROVE` or `REJECT` without using the API directly.
 
+Attach several photos normally to use them as angles of one item. To submit several items at once,
+start the caption with `BATCH` and attach one primary photo per item. If items have several angles,
+use counts such as `BATCH 2+3`, where the first two attachments are item 1 and the next three are
+item 2. Liquid accepts corrections such as `2 is Bose QC45`, reviews the generated set together,
+and then walks through the listings one item at a time.
+
 The eBay sandbox path is `POST /api/items/{item_id}/publish/ebay`. It creates a draft from approved
 photos first. The offer is published only when the request explicitly includes
 `"seller_approved": true`, and Liquid marks it live only after eBay returns a listing id.

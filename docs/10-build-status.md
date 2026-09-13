@@ -15,11 +15,12 @@ Updated 2026-09-13.
 - Authenticated BlueBubbles webhook with sender allowlisting and event deduplication
 - Complete iMessage photo intake, OpenAI product identification, enhancement preview, approval,
   rejection, and status flow
+- Multi-angle photo groups for one item and multi-item batch intake with numbered corrections
 - eBay sandbox inventory, reusable offer draft, and seller-approved publication flow
 - SQLite sale claims that pause duplicates and support confirmed or failed marketplace closes
 - Deadline pricing engine, guard, ledger, outbox, simulation, and evaluation artifacts
 - FastAPI item, photo enhancement, photo review, file, planning, tick, and ledger endpoints
-- 41 passing unit, API, property, clock, simulation, sale-claim, photo, iMessage, and eBay tests
+- 82 passing unit, API, property, clock, simulation, sale-claim, photo, iMessage, and eBay tests
 
 ## Ordered P0 queue
 

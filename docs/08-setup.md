@@ -40,6 +40,11 @@ seller approves it. The original is always kept.
 7. Text a photo and caption from `SELLER_HANDLE`. Liquid accepts messages only from that handle.
 8. Confirm the original and enhanced photos arrive, then reply `APPROVE` or `REJECT`.
 
+For one item with multiple angles, attach all photos in the same message. For multiple items, start
+the message with `BATCH` and attach one primary photo for each item. Use `BATCH 2+3` when item 1
+has two photos and item 2 has three. Confirm the numbered identity summary, approve the photo set,
+and Liquid will move through the items one at a time.
+
 Keep a specific `SELLER_HANDLE` during local testing. Set it to `*` only when intentionally opening
 the bot to multiple sellers. Each sender receives a separate seller, conversation, item, and eBay
 connection record.

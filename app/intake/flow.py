@@ -533,6 +533,7 @@ class ListingFlow:
                 outcomes[channel] = {"status": "handoff_ready", "file": handoff.file_path}
                 await self._send(chat_guid, handoff.copy_text, f"{key}:handoff-{channel}")
 
+        next_batch: tuple[str, str, int, int] | None = None
         with Session(self.engine) as session:
             item = session.get(Item, item_id)
             assert item is not None
@@ -542,7 +543,22 @@ class ListingFlow:
                 select(SellerConversation).where(SellerConversation.seller_id == item.seller_id)
             ).first()
             if conversation is not None:
-                conversation.status = ConversationStatus.LISTED
+                batch_ids = list(item.constraints_json.get("batch_item_ids") or [])
+                batch_index = int(item.constraints_json.get("batch_index") or 0)
+                if batch_index + 1 < len(batch_ids):
+                    next_item = session.get(Item, batch_ids[batch_index + 1])
+                    if next_item is None:
+                        raise LookupError("next batch item was lost")
+                    conversation.active_item_id = next_item.id
+                    conversation.status = ConversationStatus.AWAITING_DETAILS
+                    next_batch = (
+                        conversation.handle,
+                        next_item.title,
+                        batch_index + 2,
+                        len(batch_ids),
+                    )
+                else:
+                    conversation.status = ConversationStatus.LISTED
                 session.add(conversation)
             write_decision(
                 session,
@@ -561,6 +577,14 @@ class ListingFlow:
             messages.append("for facebook and offerup, paste the messages above into the apps.")
         if messages:
             await self._send(chat_guid, "\n".join(messages), f"{key}:published")
+        if next_batch is not None:
+            handle, title, position, total = next_batch
+            await self._send(
+                chat_guid,
+                f"Item {position - 1} is done. Next is item {position} of {total}: {title}.",
+                f"{key}:batch-next",
+            )
+            await self.start_details(handle=handle, chat_guid=chat_guid or "", key=f"{key}:batch")
         return {"item_id": item_id, "outcomes": outcomes}
 
     @staticmethod

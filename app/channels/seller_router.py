@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import mimetypes
 import re
 from collections.abc import Callable
@@ -15,6 +16,7 @@ from app.channels.base import InboundMessage
 from app.channels.imessage_bluebubbles import BlueBubblesAdapter
 from app.clock import Clock
 from app.inbound.identify import (
+    YES_WORDS,
     Identifier,
     ItemIdentity,
     apply_identity,
@@ -39,6 +41,7 @@ from app.photos.storage import PhotoStorage
 
 APPROVE_WORDS = {"approve", "approved", "yes", "use it", "looks good"}
 REJECT_WORDS = {"reject", "no", "do not use", "don't use it"}
+BATCH_PATTERN = re.compile(r"^(?:batch|multiple items?)\b", flags=re.IGNORECASE)
 TERMINAL_ITEM_STATUSES = {
     ItemStatus.SOLD,
     ItemStatus.DONE,
@@ -109,6 +112,23 @@ def parse_title(text: str) -> str:
     return candidate[:120]
 
 
+def batch_photo_groups(text: str, photo_count: int) -> list[list[int]]:
+    """Map attachment indexes to items. `BATCH 2+3` means two angles, then three angles."""
+    if not BATCH_PATTERN.match(text.strip()) or photo_count < 2:
+        return [list(range(photo_count))]
+    match = re.match(r"^(?:batch|multiple items?)\s+(\d+(?:\s*\+\s*\d+)+)\b", text.strip(), re.I)
+    if match:
+        counts = [int(value) for value in re.split(r"\s*\+\s*", match.group(1))]
+        if all(value > 0 for value in counts) and sum(counts) == photo_count:
+            groups: list[list[int]] = []
+            offset = 0
+            for count in counts:
+                groups.append(list(range(offset, offset + count)))
+                offset += count
+            return groups
+    return [[index] for index in range(photo_count)]
+
+
 class SellerMessageRouter:
     def __init__(
         self,
@@ -164,8 +184,9 @@ class SellerMessageRouter:
         await self.adapter.send_text(
             message.chat_guid,
             (
-                "Send a product photo with a message like: Sony WH-1000XM5 headphones, "
-                "sell by Sunday 6pm, do not go under $170. You can also reply STATUS."
+                "Send one or more product photos with a message like: Sony WH-1000XM5 "
+                "headphones, sell by Sunday 6pm, do not go under $170. Start with BATCH for "
+                "multiple items. You can also reply STATUS."
             ),
             f"{message.guid}:help",
         )
@@ -220,11 +241,19 @@ class SellerMessageRouter:
         session: Session,
         conversation: SellerConversation,
         text: str,
+        *,
+        force_new: bool = False,
     ) -> Item:
         item = (
-            session.get(Item, conversation.active_item_id) if conversation.active_item_id else None
+            session.get(Item, conversation.active_item_id)
+            if conversation.active_item_id and not force_new
+            else None
         )
-        if item is not None and item.status not in TERMINAL_ITEM_STATUSES:
+        if (
+            item is not None
+            and item.status not in TERMINAL_ITEM_STATUSES
+            and conversation.status != ConversationStatus.LISTED
+        ):
             return item
         now = self.clock.now()
         floor_cents = parse_floor_cents(text)
@@ -270,16 +299,13 @@ class SellerMessageRouter:
         return item
 
     async def _process_photo(self, message: InboundMessage) -> None:
-        attachment = next(
-            (
-                value
-                for value in message.attachments
-                if (value.mime_type or "").startswith("image/")
-                or mimetypes.guess_type(value.filename or "")[0] is not None
-            ),
-            None,
-        )
-        if attachment is None:
+        attachments = [
+            value
+            for value in message.attachments
+            if (value.mime_type or "").startswith("image/")
+            or (mimetypes.guess_type(value.filename or "")[0] or "").startswith("image/")
+        ]
+        if not attachments:
             await self.adapter.send_text(
                 message.chat_guid,
                 "Please send a HEIC, JPEG, PNG, or WebP product photo.",
@@ -287,63 +313,121 @@ class SellerMessageRouter:
             )
             return
 
+        groups = batch_photo_groups(message.text, len(attachments))
+        is_batch = len(groups) > 1
         with Session(self.engine) as session:
             conversation = self._get_or_create_conversation(session, message)
-            item = self._get_or_create_item(session, conversation, message.text)
+            items = [
+                self._get_or_create_item(
+                    session,
+                    conversation,
+                    message.text,
+                    force_new=is_batch or index > 0,
+                )
+                for index in range(len(groups))
+            ]
+            item_ids = [item.id for item in items]
+            if is_batch:
+                for index, item in enumerate(items):
+                    item.constraints_json = {
+                        **item.constraints_json,
+                        "batch_item_ids": item_ids,
+                        "batch_index": index,
+                    }
+                    session.add(item)
+                conversation.active_item_id = item_ids[0]
             conversation.status = ConversationStatus.PROCESSING_PHOTO
             session.add(conversation)
             session.commit()
-            item_id = item.id
             conversation_id = conversation.id
 
-        mime_type = attachment.mime_type or mimetypes.guess_type(attachment.filename or "")[0]
         try:
-            content = await self.adapter.download_attachment_bytes(attachment.guid)
-            if mime_type is None:
-                raise PhotoPipelineError("photo media type is missing")
+            downloaded = await asyncio.gather(
+                *(self.adapter.download_attachment_bytes(value.guid) for value in attachments)
+            )
+            media = []
+            for attachment, content in zip(attachments, downloaded, strict=True):
+                mime_type = attachment.mime_type or mimetypes.guess_type(
+                    attachment.filename or ""
+                )[0]
+                if mime_type is None:
+                    raise PhotoPipelineError("photo media type is missing")
+                media.append((attachment, content, mime_type))
         except Exception:
             await self._fail_photo(message, conversation_id)
             return
 
         if self.identifier is not None:
-            identity = await self.identifier.identify(content, mime_type, message.text)
+            identity_inputs = [media[indexes[0]] for indexes in groups]
+            identities = await asyncio.gather(
+                *(
+                    self.identifier.identify(content, mime_type, message.text)
+                    for _, content, mime_type in identity_inputs
+                )
+            )
             with Session(self.engine) as session:
-                item = session.get(Item, item_id)
                 conversation = session.get(SellerConversation, conversation_id)
-                if item is None or conversation is None:
+                if conversation is None:
                     raise LookupError("item or conversation was lost")
-                self._apply_identity(item, identity)
-                item.constraints_json = {
-                    **item.constraints_json,
-                    "pending_attachment": {"guid": attachment.guid, "mime_type": mime_type},
-                }
+                for index, item_id in enumerate(item_ids):
+                    item = session.get(Item, item_id)
+                    if item is None:
+                        raise LookupError("item was lost")
+                    identity = identities[index]
+                    self._apply_identity(item, identity)
+                    item_media = [media[media_index] for media_index in groups[index]]
+                    item.constraints_json = {
+                        **item.constraints_json,
+                        "pending_attachments": [
+                            {"guid": value.guid, "mime_type": mime_type}
+                            for value, _, mime_type in item_media
+                        ],
+                    }
+                    session.add(item)
+                    write_decision(
+                        session,
+                        item_id=item.id,
+                        sim_at=self.clock.now(),
+                        wall_at=self.clock.wall(),
+                        kind="system",
+                        action="identify",
+                        inputs={
+                            "title": identity.title,
+                            "confidence": identity.confidence,
+                            "candidates": [candidate.title for candidate in identity.candidates],
+                            "photo_count": len(item_media),
+                            "batch_size": len(item_ids),
+                        },
+                        reason="asked the seller to confirm identified batch items before listing",
+                        price_before=None,
+                        price_after=None,
+                    )
                 conversation.status = ConversationStatus.AWAITING_IDENTITY
                 conversation.updated_at = self.clock.now()
-                session.add(item)
                 session.add(conversation)
-                write_decision(
-                    session,
-                    item_id=item.id,
-                    sim_at=self.clock.now(),
-                    wall_at=self.clock.wall(),
-                    kind="system",
-                    action="identify",
-                    inputs={
-                        "title": identity.title,
-                        "confidence": identity.confidence,
-                        "candidates": [c.title for c in identity.candidates],
-                    },
-                    reason="asked the seller to confirm the identified item before listing",
-                    price_before=None,
-                    price_after=None,
-                )
                 session.commit()
-            await self.adapter.send_text(
-                message.chat_guid, identity.question(), f"{message.guid}:identify"
-            )
+            if is_batch:
+                summary = "\n".join(
+                    f"{index}. {identity.title} ({len(groups[index - 1])} photos)"
+                    for index, identity in enumerate(identities, start=1)
+                )
+                question = (
+                    f"I found {len(identities)} items:\n{summary}\n"
+                    "Reply YES if all are right, or say something like '2 is Bose QC45'."
+                )
+            else:
+                question = identities[0].question()
+                if len(media) > 1:
+                    question += f"\nI will use all {len(media)} photos as angles of this item."
+            await self.adapter.send_text(message.chat_guid, question, f"{message.guid}:identify")
             return
 
-        await self._enhance_or_store(message, item_id, conversation_id, content, mime_type)
+        jobs = [
+            (item_ids[item_index], media[media_index][1], media[media_index][2])
+            for item_index, indexes in enumerate(groups)
+            for media_index in indexes
+        ]
+        await self._enhance_or_store_many(message, conversation_id, jobs)
 
     @staticmethod
     def _apply_identity(item: Item, identity: ItemIdentity) -> None:
@@ -361,6 +445,7 @@ class SellerMessageRouter:
 
     async def _confirm_identity(self, message: InboundMessage) -> bool:
         """Handle the reply to "is it this?"; returns True when the message was consumed."""
+        repeat_text: str | None = None
         with Session(self.engine) as session:
             conversation = session.exec(
                 select(SellerConversation).where(SellerConversation.handle == message.handle)
@@ -374,48 +459,104 @@ class SellerMessageRouter:
             item = session.get(Item, conversation.active_item_id)
             if item is None:
                 return False
-            identity = ItemIdentity.model_validate(item.constraints_json.get("identity") or {})
-            kind, title = interpret_confirmation(message.text, identity)
-            if kind == "named" and not title:
-                await self.adapter.send_text(
-                    message.chat_guid,
-                    identity.question(),
-                    f"{message.guid}:identify-repeat",
-                )
-                return True
-            if kind != "yes" and title:
-                item.title = title[:120]
-                item.confidence = 1.0
-            elif kind == "yes":
-                item.confidence = max(item.confidence, 0.95)
-            pending = item.constraints_json.get("pending_attachment") or {}
-            conversation.status = ConversationStatus.PROCESSING_PHOTO
-            conversation.updated_at = self.clock.now()
-            session.add(item)
-            session.add(conversation)
-            write_decision(
-                session,
-                item_id=item.id,
-                sim_at=self.clock.now(),
-                wall_at=self.clock.wall(),
-                kind="seller",
-                action="confirm_identity",
-                inputs={"reply": message.text, "title": item.title},
-                reason="seller confirmed what the item is",
-                price_before=None,
-                price_after=None,
+            item_ids = list(item.constraints_json.get("batch_item_ids") or [item.id])
+            items = [session.get(Item, item_id) for item_id in item_ids]
+            if any(value is None for value in items):
+                raise LookupError("batch item was lost")
+            batch_items = [value for value in items if value is not None]
+            lowered = message.text.strip().lower().rstrip(".! ")
+
+            if len(batch_items) > 1 and lowered not in YES_WORDS:
+                correction = re.match(r"^(\d+)\s+(?:is|=)\s+(.+)$", message.text.strip())
+                if correction and 1 <= int(correction.group(1)) <= len(batch_items):
+                    corrected = batch_items[int(correction.group(1)) - 1]
+                    corrected.title = correction.group(2).strip()[:120]
+                    corrected.confidence = 1.0
+                    session.add(corrected)
+                    session.commit()
+                    summary = "\n".join(
+                        f"{index}. {value.title}"
+                        for index, value in enumerate(batch_items, start=1)
+                    )
+                    repeat_text = f"Updated.\n{summary}\nReply YES if all are right."
+                else:
+                    repeat_text = (
+                        "Reply YES if every item is right, or correct one like "
+                        "'2 is Bose QC45'."
+                    )
+            elif len(batch_items) == 1:
+                identity = ItemIdentity.model_validate(item.constraints_json.get("identity") or {})
+                kind, title = interpret_confirmation(message.text, identity)
+                if kind == "named" and not title:
+                    repeat_text = identity.question()
+                elif kind != "yes" and title:
+                    item.title = title[:120]
+                    item.confidence = 1.0
+                elif kind == "yes":
+                    item.confidence = max(item.confidence, 0.95)
+
+            if repeat_text is not None:
+                session.add(item)
+                session.commit()
+            else:
+                for value in batch_items:
+                    value.confidence = max(value.confidence, 0.95)
+                    session.add(value)
+            conversation.status = (
+                ConversationStatus.AWAITING_IDENTITY
+                if repeat_text is not None
+                else ConversationStatus.PROCESSING_PHOTO
             )
+            conversation.updated_at = self.clock.now()
+            session.add(conversation)
+            pending_by_item: list[tuple[str, list[dict]]] = []
+            for value in batch_items:
+                pending = list(value.constraints_json.get("pending_attachments") or [])
+                legacy = value.constraints_json.get("pending_attachment")
+                if not pending and legacy:
+                    pending = [legacy]
+                pending_by_item.append((value.id, pending))
+                if repeat_text is None:
+                    write_decision(
+                        session,
+                        item_id=value.id,
+                        sim_at=self.clock.now(),
+                        wall_at=self.clock.wall(),
+                        kind="seller",
+                        action="confirm_identity",
+                        inputs={"reply": message.text, "title": value.title},
+                        reason="seller confirmed what the item is",
+                        price_before=None,
+                        price_after=None,
+                    )
             session.commit()
-            item_id = item.id
             conversation_id = conversation.id
 
+        if repeat_text is not None:
+            await self.adapter.send_text(
+                message.chat_guid,
+                repeat_text,
+                f"{message.guid}:identify-repeat",
+            )
+            return True
+
         try:
-            content = await self.adapter.download_attachment_bytes(pending["guid"])
-            mime_type = pending.get("mime_type") or "image/jpeg"
+            flattened = [
+                (item_id, pending)
+                for item_id, values in pending_by_item
+                for pending in values
+            ]
+            contents = await asyncio.gather(
+                *(self.adapter.download_attachment_bytes(value["guid"]) for _, value in flattened)
+            )
+            jobs = [
+                (item_id, content, pending.get("mime_type") or "image/jpeg")
+                for (item_id, pending), content in zip(flattened, contents, strict=True)
+            ]
         except Exception:
             await self._fail_photo(message, conversation_id)
             return True
-        await self._enhance_or_store(message, item_id, conversation_id, content, mime_type)
+        await self._enhance_or_store_many(message, conversation_id, jobs)
         return True
 
     async def _fail_photo(self, message: InboundMessage, conversation_id: str) -> None:
@@ -431,65 +572,86 @@ class SellerMessageRouter:
             f"{message.guid}:failed",
         )
 
-    async def _store_original_only(
-        self, message: InboundMessage, item_id: str, conversation_id: str, content: bytes, mime: str
+    async def _store_originals_only(
+        self,
+        message: InboundMessage,
+        conversation_id: str,
+        jobs: list[tuple[str, bytes, str]],
     ) -> None:
-        """No image editor configured: keep the original and continue to the listing questions."""
+        """No editor configured: keep every original and continue to listing questions."""
         with Session(self.engine) as session:
-            item = session.get(Item, item_id)
             conversation = session.get(SellerConversation, conversation_id)
-            if item is None or conversation is None:
-                raise LookupError("item or conversation was lost")
-            try:
-                stored = self.storage.save_original(item.id, content, mime)
-            except ValueError:
-                session.rollback()
-                await self._fail_photo(message, conversation_id)
-                return
-            original = ProductPhoto(
-                item_id=item.id,
-                role=PhotoRole.ORIGINAL,
-                status=PhotoStatus.ORIGINAL,
-                file_path=stored.relative_path,
-                mime_type=stored.mime_type,
-                sha256=stored.sha256,
-            )
-            session.add(original)
-            item.photo_paths = [*item.photo_paths, stored.relative_path]
+            if conversation is None:
+                raise LookupError("conversation was lost")
+            for item_id, content, mime in jobs:
+                item = session.get(Item, item_id)
+                if item is None:
+                    raise LookupError("item was lost")
+                try:
+                    stored = self.storage.save_original(item.id, content, mime)
+                except ValueError:
+                    session.rollback()
+                    await self._fail_photo(message, conversation_id)
+                    return
+                session.add(
+                    ProductPhoto(
+                        item_id=item.id,
+                        role=PhotoRole.ORIGINAL,
+                        status=PhotoStatus.ORIGINAL,
+                        file_path=stored.relative_path,
+                        mime_type=stored.mime_type,
+                        sha256=stored.sha256,
+                    )
+                )
+                item.photo_paths = [*item.photo_paths, stored.relative_path]
+                session.add(item)
             conversation.status = ConversationStatus.AWAITING_DETAILS
             conversation.updated_at = self.clock.now()
-            session.add(item)
             session.add(conversation)
             session.commit()
         await self.adapter.send_text(
             message.chat_guid,
-            "got the photo. photo cleanup is off right now, so i'll list with your original.",
+            (
+                "got the photo. photo cleanup is off right now, so i'll list with your original."
+                if len(jobs) == 1
+                else f"got {len(jobs)} photos. photo cleanup is off, so I kept every original."
+            ),
             f"{message.guid}:original-only",
         )
 
-    async def _enhance_or_store(
-        self, message: InboundMessage, item_id: str, conversation_id: str, content: bytes, mime: str
+    async def _enhance_or_store_many(
+        self,
+        message: InboundMessage,
+        conversation_id: str,
+        jobs: list[tuple[str, bytes, str]],
     ) -> None:
         if self.editor is None:
-            await self._store_original_only(message, item_id, conversation_id, content, mime)
+            await self._store_originals_only(message, conversation_id, jobs)
             return
         await self.adapter.send_text(
             message.chat_guid,
-            "Got it. I am preparing a cleaner, truthful listing photo now.",
+            f"Got {len(jobs)} photos. I am preparing truthful listing versions now.",
             f"{message.guid}:processing",
         )
-        try:
-            result = await enhance_product_photo(
-                engine=self.engine,
-                item_id=item_id,
-                content=content,
-                mime_type=mime,
-                preset=PhotoPreset.STUDIO,
-                editor=self.editor,
-                storage=self.storage,
-                reviewer=self.reviewer,
-            )
-        except Exception:
+        results = []
+        failed = 0
+        for item_id, content, mime in jobs:
+            try:
+                results.append(
+                    await enhance_product_photo(
+                        engine=self.engine,
+                        item_id=item_id,
+                        content=content,
+                        mime_type=mime,
+                        preset=PhotoPreset.STUDIO,
+                        editor=self.editor,
+                        storage=self.storage,
+                        reviewer=self.reviewer,
+                    )
+                )
+            except Exception:
+                failed += 1
+        if not results:
             with Session(self.engine) as session:
                 conversation = session.get(SellerConversation, conversation_id)
                 if conversation is not None:
@@ -498,80 +660,125 @@ class SellerMessageRouter:
                     session.commit()
             await self.adapter.send_text(
                 message.chat_guid,
-                "I could not enhance that photo. Try sending it again as a normal photo.",
+                "I could not enhance those photos. Try sending them again as normal photos.",
                 f"{message.guid}:failed",
             )
             return
 
         with Session(self.engine) as session:
             conversation = session.get(SellerConversation, conversation_id)
-            if conversation is None:
+            anchor = (
+                session.get(Item, conversation.active_item_id)
+                if conversation is not None and conversation.active_item_id
+                else None
+            )
+            if conversation is None or anchor is None:
                 raise LookupError("seller conversation was lost")
-            conversation.pending_photo_id = result.enhanced.id
+            pending_ids = [result.enhanced.id for result in results]
+            anchor.constraints_json = {
+                **anchor.constraints_json,
+                "pending_photo_ids": pending_ids,
+            }
+            conversation.pending_photo_id = pending_ids[0]
             conversation.status = ConversationStatus.AWAITING_PHOTO_REVIEW
             conversation.updated_at = self.clock.now()
+            session.add(anchor)
             session.add(conversation)
             session.commit()
 
+        for index, result in enumerate(results, start=1):
+            await self.adapter.send_text(
+                message.chat_guid,
+                f"Photo {index}: original, then enhanced.",
+                f"{message.guid}:pair-{index}",
+            )
+            await self.adapter.send_image(
+                message.chat_guid,
+                str(self.storage.resolve(result.original.file_path)),
+                f"{message.guid}:original-{index}",
+            )
+            await self.adapter.send_image(
+                message.chat_guid,
+                str(self.storage.resolve(result.enhanced.file_path)),
+                f"{message.guid}:enhanced-{index}",
+            )
+        failed_note = f" {failed} could not be processed." if failed else ""
         await self.adapter.send_text(
             message.chat_guid,
-            "Original first, then the enhanced version. Reply APPROVE or REJECT.",
+            (
+                "Original first, then the enhanced version. Reply APPROVE or REJECT."
+                if len(results) == 1 and not failed
+                else (
+                    f"Those are {len(results)} original and enhanced pairs.{failed_note} "
+                    "Reply APPROVE or REJECT for all enhanced photos."
+                )
+            ),
             f"{message.guid}:preview-label",
-        )
-        await self.adapter.send_image(
-            message.chat_guid,
-            str(self.storage.resolve(result.original.file_path)),
-            f"{message.guid}:original",
-        )
-        await self.adapter.send_image(
-            message.chat_guid,
-            str(self.storage.resolve(result.enhanced.file_path)),
-            f"{message.guid}:enhanced",
         )
 
     async def _review_pending(self, message: InboundMessage, *, approved: bool) -> None:
         with Session(self.engine) as session:
             conversation = self._get_or_create_conversation(session, message)
-            photo = (
-                session.get(ProductPhoto, conversation.pending_photo_id)
-                if conversation.pending_photo_id
+            anchor = (
+                session.get(Item, conversation.active_item_id)
+                if conversation.active_item_id
                 else None
             )
-            if photo is None or photo.status != PhotoStatus.REVIEW:
+            pending_ids = list(
+                (anchor.constraints_json.get("pending_photo_ids") if anchor else None)
+                or ([conversation.pending_photo_id] if conversation.pending_photo_id else [])
+            )
+            photos = [session.get(ProductPhoto, photo_id) for photo_id in pending_ids]
+            review_photos = [
+                photo
+                for photo in photos
+                if photo is not None and photo.status == PhotoStatus.REVIEW
+            ]
+            if not review_photos:
                 session.commit()
                 response = "There is no enhanced photo waiting for review."
             else:
-                item = session.get(Item, photo.item_id)
-                if item is None or photo.role != PhotoRole.ENHANCED:
-                    raise LookupError("pending photo item was lost")
-                photo.status = PhotoStatus.APPROVED if approved else PhotoStatus.REJECTED
-                photo.reviewed_at = self.clock.now()
-                if approved and photo.file_path not in item.photo_paths:
-                    item.photo_paths = [*item.photo_paths, photo.file_path]
-                    session.add(item)
+                item_ids: set[str] = set()
+                for photo in review_photos:
+                    item = session.get(Item, photo.item_id)
+                    if item is None or photo.role != PhotoRole.ENHANCED:
+                        raise LookupError("pending photo item was lost")
+                    item_ids.add(item.id)
+                    photo.status = PhotoStatus.APPROVED if approved else PhotoStatus.REJECTED
+                    photo.reviewed_at = self.clock.now()
+                    if approved and photo.file_path not in item.photo_paths:
+                        item.photo_paths = [*item.photo_paths, photo.file_path]
+                        session.add(item)
+                    session.add(photo)
+                    write_decision(
+                        session,
+                        item_id=item.id,
+                        sim_at=self.clock.now(),
+                        wall_at=self.clock.wall(),
+                        kind="seller",
+                        action="approve_photo" if approved else "reject_photo",
+                        inputs={"photo_id": photo.id, "channel": "imessage"},
+                        reason="seller reviewed an AI-enhanced image in iMessage",
+                        price_before=None,
+                        price_after=None,
+                    )
+                if anchor is not None:
+                    anchor.constraints_json = {
+                        **anchor.constraints_json,
+                        "pending_photo_ids": [],
+                    }
+                    session.add(anchor)
                 conversation.pending_photo_id = None
                 conversation.status = ConversationStatus.AWAITING_DETAILS
-                session.add(photo)
                 session.add(conversation)
-                write_decision(
-                    session,
-                    item_id=item.id,
-                    sim_at=self.clock.now(),
-                    wall_at=self.clock.wall(),
-                    kind="seller",
-                    action="approve_photo" if approved else "reject_photo",
-                    inputs={"photo_id": photo.id, "channel": "imessage"},
-                    reason="seller reviewed the AI-enhanced image in iMessage",
-                    price_before=None,
-                    price_after=None,
-                )
                 session.commit()
                 response = (
-                    "Approved. The original stays in the listing set too."
-                    if approved
-                    else (
-                        "Rejected. I will not use that enhanced image. Send another photo to retry."
+                    (
+                        f"Approved {len(review_photos)} enhanced photos across "
+                        f"{len(item_ids)} items. Every original stays in its listing set."
                     )
+                    if approved
+                    else f"Rejected {len(review_photos)} enhanced photos. I kept every original."
                 )
         await self.adapter.send_text(
             message.chat_guid,

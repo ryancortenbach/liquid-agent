@@ -213,6 +213,63 @@ def test_go_publishes_to_ebay_sandbox_when_configured(tmp_path: Path) -> None:
             assert pack.status == ListingPackStatus.PUBLISHED and pack.external_id == "1100001"
 
 
+def test_publishing_advances_to_next_batch_item(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    app = create_app(
+        make_settings(tmp_path), photo_editor=FakePhotoEditor(), message_adapter=adapter
+    )
+    with TestClient(app) as client:
+        send(client, "b1", "Sony WH-1000XM5 headphones", with_photo=True)
+        send(client, "b2", "approve")
+        send(client, "b3", "good, just the item")
+        send(client, "b4", "3 days, $170 floor, ship, facebook only")
+
+        with Session(app.state.engine) as session:
+            first = session.exec(select(Item)).one()
+            second = Item(
+                seller_id=first.seller_id,
+                title="Bose QC45 headphones",
+                category="headphones",
+                condition=first.condition,
+                confidence=0.95,
+                deadline_at=first.deadline_at,
+                original_horizon_hours=first.original_horizon_hours,
+                floor_cents=12_000,
+                floor_source="seller",
+                constraints_json={"batch_index": 1},
+                market_value_cents=16_000,
+                sigma_cents=2_000,
+                status=ItemStatus.DRAFT,
+            )
+            session.add(second)
+            session.flush()
+            batch_ids = [first.id, second.id]
+            first.constraints_json = {
+                **first.constraints_json,
+                "batch_item_ids": batch_ids,
+                "batch_index": 0,
+            }
+            second.constraints_json = {
+                **second.constraints_json,
+                "batch_item_ids": batch_ids,
+            }
+            session.add(first)
+            session.add(second)
+            session.commit()
+            second_id = second.id
+
+        send(client, "b5", "go")
+        assert any(
+            "Next is item 2 of 2: Bose QC45 headphones" in text
+            for text in adapter.sent_texts
+        )
+        assert adapter.sent_texts[-1].startswith("two quick things")
+        with Session(app.state.engine) as session:
+            conversation = session.exec(select(SellerConversation)).one()
+            assert conversation.active_item_id == second_id
+            assert conversation.status == ConversationStatus.AWAITING_DETAILS
+
+
 def test_api_path_plans_and_publishes_without_imessage(tmp_path: Path) -> None:
     app = create_app(make_settings(tmp_path, seller_handle=None), photo_editor=FakePhotoEditor())
     with TestClient(app) as client:

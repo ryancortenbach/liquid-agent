@@ -14,7 +14,14 @@ from app.inbound.identify import (
     interpret_confirmation,
 )
 from app.main import create_app
-from app.models import ConversationStatus, Item, LedgerEvent, ProductPhoto, SellerConversation
+from app.models import (
+    ConversationStatus,
+    Item,
+    LedgerEvent,
+    PhotoStatus,
+    ProductPhoto,
+    SellerConversation,
+)
 from tests.test_listing_flow import (
     SELLER,
     FakeMessageAdapter,
@@ -49,11 +56,33 @@ class FakeIdentifier:
         return IDENTITY
 
 
+class SequenceIdentifier:
+    def __init__(self, identities: list[ItemIdentity]) -> None:
+        self.identities = iter(identities)
+
+    async def identify(self, content: bytes, mime_type: str, caption: str) -> ItemIdentity:
+        return next(self.identities)
+
+
 def send(client: TestClient, guid: str, text: str, *, with_photo: bool = False) -> None:
     response = client.post(
         "/webhooks/bluebubbles?secret=webhook-secret",
         json=payload(guid, text, with_photo=with_photo),
     )
+    assert response.json()["status"] == "queued"
+
+
+def send_photos(client: TestClient, guid: str, text: str, count: int) -> None:
+    body = payload(guid, text)
+    body["data"]["attachments"] = [
+        {
+            "guid": f"attachment-{index}",
+            "mimeType": "image/jpeg",
+            "transferName": f"angle-{index}.jpg",
+        }
+        for index in range(1, count + 1)
+    ]
+    response = client.post("/webhooks/bluebubbles?secret=webhook-secret", json=body)
     assert response.json()["status"] == "queued"
 
 
@@ -180,6 +209,67 @@ def test_named_correction_and_no_editor_fallback(tmp_path: Path) -> None:
             assert len(photos) == 1 and photos[0].role.value == "original"
             conversation = session.exec(select(SellerConversation)).one()
             assert conversation.status == ConversationStatus.AWAITING_DETAILS
+
+
+def test_multiple_photos_stay_with_one_item_and_review_together(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    app = create_app(
+        make_settings(tmp_path),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+        identifier=FakeIdentifier(),
+    )
+    with TestClient(app) as client:
+        send_photos(client, "multi-1", "sell this by sunday", 3)
+        assert adapter.sent_texts[-1].endswith("all 3 photos as angles of this item.")
+
+        send(client, "multi-2", "yes")
+        assert len(adapter.sent_images) == 6
+        assert "3 original and enhanced pairs" in adapter.sent_texts[-1]
+
+        send(client, "multi-3", "approve")
+        with Session(app.state.engine) as session:
+            assert len(session.exec(select(Item)).all()) == 1
+            photos = session.exec(select(ProductPhoto)).all()
+            assert len(photos) == 6
+            assert sum(photo.status == PhotoStatus.APPROVED for photo in photos) == 3
+
+
+def test_batch_creates_separate_items_and_accepts_numbered_correction(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    second = IDENTITY.model_copy(
+        update={
+            "title": "Sony WH-1000XM5 headphones",
+            "brand": "Sony",
+            "model": "WH-1000XM5",
+            "category": "headphones",
+        }
+    )
+    app = create_app(
+        make_settings(tmp_path),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+        identifier=SequenceIdentifier([IDENTITY, second]),
+    )
+    with TestClient(app) as client:
+        send_photos(client, "batch-1", "BATCH 2+1 sell these by sunday", 3)
+        assert "I found 2 items" in adapter.sent_texts[-1]
+        assert "1. Apple iPad Air" in adapter.sent_texts[-1]
+        assert "(2 photos)" in adapter.sent_texts[-1]
+        assert "2. Sony WH-1000XM5" in adapter.sent_texts[-1]
+
+        send(client, "batch-2", "2 is Bose QC45 headphones")
+        assert "2. Bose QC45 headphones" in adapter.sent_texts[-1]
+        send(client, "batch-3", "yes")
+        assert len(adapter.sent_images) == 6
+        send(client, "batch-4", "approve")
+
+        with Session(app.state.engine) as session:
+            items = session.exec(select(Item).order_by(Item.created_at)).all()
+            assert len(items) == 2
+            assert [item.title for item in items] == [IDENTITY.title, "Bose QC45 headphones"]
+            assert [len(item.photo_paths) for item in items] == [4, 2]
+            assert all(len(item.constraints_json["batch_item_ids"]) == 2 for item in items)
 
 
 def test_openai_identifier_parses_and_normalizes(tmp_path: Path) -> None:
