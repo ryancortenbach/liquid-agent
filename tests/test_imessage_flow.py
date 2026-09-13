@@ -20,6 +20,7 @@ from app.models import (
     ItemStatus,
     PhotoStatus,
     ProductPhoto,
+    Seller,
     SellerConversation,
     WebhookReceipt,
 )
@@ -481,6 +482,9 @@ def test_wildcard_seller_handle_accepts_multiple_sellers(tmp_path: Path) -> None
             "Nothing's in progress right now. Send me a photo whenever you're ready.",
             "Nothing's in progress right now. Send me a photo whenever you're ready.",
         ]
+        with Session(app.state.engine) as session:
+            assert len(session.exec(select(Seller)).all()) == 2
+            assert len(session.exec(select(SellerConversation)).all()) == 2
 
 
 def test_start_over_cancels_active_draft_and_resets_conversation(tmp_path: Path) -> None:

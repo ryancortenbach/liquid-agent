@@ -71,6 +71,11 @@ For iMessage, configure BlueBubbles and the webhook values described in `docs/08
 seller can then text a photo and caption, receive the original and enhanced versions, and reply
 `APPROVE` or `REJECT` without using the API directly.
 
+Set `SELLER_HANDLE=*` during multi-user testing so every sender receives an isolated seller
+conversation. The local runner records accepted messages with a masked sender, message id, text,
+and attachment count so failed or confusing flows can be reviewed without exposing full phone
+numbers in the logs.
+
 Attach several photos normally to use them as angles of one item. To submit several items at once,
 start the caption with `BATCH` and attach one primary photo per item. If items have several angles,
 use counts such as `BATCH 2+3`, where the first two attachments are item 1 and the next three are

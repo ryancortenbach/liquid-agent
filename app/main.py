@@ -641,16 +641,24 @@ def create_app(
             raise HTTPException(status_code=422, detail="invalid BlueBubbles payload") from exc
         if message is None:
             return {"status": "ignored"}
+        sender_label = f"***{canonical_handle(message.handle)[-4:]}"
         if not router.accepts(message):
+            log.warning("Liquid inbound ignored sender=%s reason=sender_not_allowed", sender_label)
             return {"status": "ignored", "reason": "sender_not_allowed"}
 
         with Session(engine) as session:
             existing = session.get(WebhookReceipt, ("bluebubbles", message.guid))
             if existing is not None:
+                log.info("Liquid inbound duplicate sender=%s guid=%s", sender_label, message.guid)
                 return {"status": "duplicate"}
             fingerprint = inbound_fingerprint(message)
             duplicate_content = session.get(InboundFingerprint, ("bluebubbles", fingerprint))
             if duplicate_content is not None:
+                log.info(
+                    "Liquid inbound duplicate sender=%s guid=%s reason=same_message_content",
+                    sender_label,
+                    message.guid,
+                )
                 return {"status": "duplicate", "reason": "same_message_content"}
             session.add(WebhookReceipt(provider="bluebubbles", event_id=message.guid))
             session.add(
@@ -665,6 +673,13 @@ def create_app(
             except IntegrityError:
                 session.rollback()
                 return {"status": "duplicate", "reason": "same_message_content"}
+        log.info(
+            "Liquid inbound queued sender=%s guid=%s text=%r attachments=%d",
+            sender_label,
+            message.guid,
+            message.text[:500],
+            len(message.attachments),
+        )
         background_tasks.add_task(process_bluebubbles_message, message)
         return {"status": "queued"}
 
