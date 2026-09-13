@@ -15,6 +15,8 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     logging.getLogger("app").setLevel(logging.INFO)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpx2").setLevel(logging.WARNING)
     uvicorn.run(
         "app.main:app",
         host="127.0.0.1",
