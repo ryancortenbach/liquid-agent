@@ -1080,15 +1080,17 @@ class SellerMessageRouter:
         if self.editor is None:
             await self._store_originals_only(message, conversation_id, jobs)
             return
-        await self.adapter.send_text(
-            message.chat_guid,
-            (
-                "Got it. Give me a sec to clean it up."
-                if len(jobs) == 1
-                else f"Got all {len(jobs)} photos. Give me a sec to clean them up."
-            ),
-            f"{message.guid}:processing",
-        )
+        pre_acknowledged = not message.attachments and message.text.strip().lower() in APPROVE_WORDS
+        if not pre_acknowledged:
+            await self.adapter.send_text(
+                message.chat_guid,
+                (
+                    "Got it. Give me a sec to clean it up."
+                    if len(jobs) == 1
+                    else f"Got all {len(jobs)} photos. Give me a sec to clean them up."
+                ),
+                f"{message.guid}:processing",
+            )
         results = []
         failed = 0
         for item_id, content, mime in jobs:
@@ -1226,7 +1228,6 @@ class SellerMessageRouter:
                 conversation.status = ConversationStatus.AWAITING_DETAILS
                 session.add(conversation)
                 session.commit()
-                # An approval needs no acknowledgment: the listing questions follow immediately.
                 response = "" if approved else "No problem. We'll keep your original."
         if response:
             await self.adapter.send_text(

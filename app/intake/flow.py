@@ -50,6 +50,7 @@ from app.research.sources import CompsSource
 log = logging.getLogger(__name__)
 
 GO_WORDS = {
+    "yes",
     "go",
     "publish",
     "list it",
@@ -215,11 +216,12 @@ class ListingFlow:
             if following:
                 await self._send(chat_guid, QUESTION_SETS[following], f"{key}:q-{following}")
                 return True
-            await self._send(
-                chat_guid,
-                "Perfect. I'm checking what these actually sell for now.",
-                f"{key}:researching",
-            )
+            if lowered not in GO_WORDS:
+                await self._send(
+                    chat_guid,
+                    "Perfect. I'm checking what these actually sell for now.",
+                    f"{key}:researching",
+                )
             await self.plan(item_id, research=True, chat_guid=chat_guid, key=key)
             return True
 

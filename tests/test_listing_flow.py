@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from io import BytesIO
 from pathlib import Path
 
@@ -263,8 +264,10 @@ def test_ebay_demo_mode_publishes_working_preview_without_credentials(tmp_path: 
         send(client, "demo-2", "approve")
         send(client, "demo-3", "like new, just the item")
         send(client, "demo-4", "week, you decide, ship, ebay only")
-        send(client, "demo-5", "go")
+        before_publish = len(adapter.sent_texts)
+        send(client, "demo-5", "yes")
 
+        assert adapter.sent_texts[before_publish] == "You bet. I'm building the mock listing now."
         final = adapter.sent_texts[-1]
         assert "eBay demo preview is ready: https://demo.example.com/demo/ebay/listings/" in final
         with Session(app.state.engine) as session:
@@ -276,6 +279,42 @@ def test_ebay_demo_mode_publishes_working_preview_without_credentials(tmp_path: 
         assert preview.status_code == 200
         assert "Demo listing. This item has not been published to eBay." in preview.text
         assert "Sony WH-1000XM5 headphones" in preview.text
+
+
+def test_demo_yes_is_acknowledged_before_waiting_for_the_seller_lock(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    app = create_app(
+        make_settings(
+            tmp_path,
+            public_base_url="https://demo.example.com",
+            ebay_demo_mode=True,
+        ),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+    )
+
+    with TestClient(app) as client:
+        send(client, "ack-1", "Sony WH-1000XM5 headphones", with_photo=True)
+        send(client, "ack-2", "approve")
+        send(client, "ack-3", "like new, just the item")
+        send(client, "ack-4", "week, you decide, ship, ebay only")
+        message = adapter.parse_inbound(payload("ack-5", "yes"))
+        assert message is not None
+        adapter.sent_texts.clear()
+
+        async def run_while_locked() -> None:
+            lock = app.state.message_locks[SELLER]
+            await lock.acquire()
+            task = asyncio.create_task(app.state.process_bluebubbles_message(message))
+            await asyncio.sleep(0)
+            assert adapter.sent_texts == ["You bet. I'm building the mock listing now."]
+            assert not task.done()
+            lock.release()
+            await task
+
+        asyncio.run(run_while_locked())
+
+    assert "eBay demo preview is ready" in adapter.sent_texts[-1]
 
 
 def test_publishing_advances_to_next_batch_item(tmp_path: Path) -> None:

@@ -20,6 +20,22 @@ DIRECT_TEXT = {
     "connect ebay",
     "connect email",
 }
+ACKNOWLEDGEMENT_WORDS = {
+    "approve",
+    "approved",
+    "yes",
+    "use it",
+    "looks good",
+    "go",
+    "publish",
+    "list it",
+    "post it",
+    "do it",
+    "go ahead",
+    "ok go",
+    "yes go",
+    "ship it",
+}
 INTENT_TEXT = {
     ChatIntent.STATUS: "status",
     ChatIntent.HELP: "help",
@@ -50,6 +66,35 @@ class PipelineRouter:
 
     def accepts(self, message: InboundMessage) -> bool:
         return self.base.accepts(message)
+
+    async def acknowledge(self, message: InboundMessage) -> bool:
+        """Confirm seller actions before serialized or slow work begins."""
+        if message.attachments or message.text.strip().lower() not in ACKNOWLEDGEMENT_WORDS:
+            return False
+        status = self.base.chat_context(message.handle).get("conversation_status")
+        responses = {
+            "awaiting_identity": "You bet. I'm cleaning up the photos now.",
+            "awaiting_photo_review": "You bet. I'll use those photos.",
+            "awaiting_details": "Got it. I'm on it.",
+            "researching": "I'm on it. I'll send it as soon as it's ready.",
+            "publishing": "I'm on it. I'll send the link as soon as it's ready.",
+        }
+        if status == "awaiting_confirmation":
+            response = (
+                "You bet. I'm building the mock listing now."
+                if self.base.ebay_demo_mode
+                else "You bet. I'm posting it now."
+            )
+        else:
+            response = responses.get(status)
+        if response is None:
+            return False
+        await self.base.adapter.send_text(
+            message.chat_guid,
+            response,
+            f"{message.guid}:ack",
+        )
+        return True
 
     async def route(self, message: InboundMessage) -> None:
         if not self.accepts(message):

@@ -216,8 +216,7 @@ def test_imessage_photo_preview_approval_and_deduplication(tmp_path: Path) -> No
             json=message_payload(guid="message-2", text="APPROVE"),
         )
         assert approval.json()["status"] == "queued"
-        # no acknowledgment chatter: the listing flow's first question follows the approval
-        assert not any(text.startswith("Approved") for text in adapter.sent_texts)
+        assert adapter.sent_texts[-2] == "You bet. I'll use those photos."
         assert adapter.sent_texts[-1].startswith("How would you describe the condition?")
 
         with Session(app.state.engine) as session:

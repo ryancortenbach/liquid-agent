@@ -598,12 +598,28 @@ def create_app(
         )
 
     async def process_bluebubbles_message(message) -> None:
-        router: SellerMessageRouter = app.state.seller_router
+        router: PipelineRouter = app.state.seller_router
+        sender_label = f"***{canonical_handle(message.handle)[-4:]}"
+        started_at = asyncio.get_running_loop().time()
         try:
+            acknowledged = await router.acknowledge(message)
             async with app.state.message_locks[canonical_handle(message.handle)]:
                 await router.route(message)
+            elapsed_ms = round((asyncio.get_running_loop().time() - started_at) * 1000)
+            log.info(
+                "Liquid inbound completed sender=%s guid=%s acknowledged=%s elapsed_ms=%d",
+                sender_label,
+                message.guid,
+                acknowledged,
+                elapsed_ms,
+            )
         except Exception as exc:
-            log.exception("BlueBubbles message processing failed: %s", exc)
+            log.exception(
+                "BlueBubbles message processing failed sender=%s guid=%s: %s",
+                sender_label,
+                message.guid,
+                exc,
+            )
             with Session(app.state.engine) as session:
                 receipt = session.get(WebhookReceipt, ("bluebubbles", message.guid))
                 if receipt is not None:
