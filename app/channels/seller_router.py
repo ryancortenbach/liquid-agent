@@ -35,6 +35,7 @@ from app.models import (
     EmailConnection,
     Item,
     ItemStatus,
+    ListingPack,
     PhotoRole,
     PhotoStatus,
     ProductPhoto,
@@ -1340,4 +1341,18 @@ class SellerMessageRouter:
                     ConversationStatus.LISTED: "it's all set, send another photo anytime",
                 }
                 step = steps.get(conversation.status, conversation.status.value)
-                return f"{item.title}: {step}"
+                response = f"{item.title}: {step}"
+                if conversation.status == ConversationStatus.LISTED:
+                    # Resend the live link. It is only texted once at publish time, and
+                    # a seller who lost it (or got one from a dead tunnel) has no other
+                    # way to get it back without republishing.
+                    links = [
+                        f"{pack.channel}: {pack.external_url}"
+                        for pack in session.exec(
+                            select(ListingPack).where(ListingPack.item_id == item.id)
+                        ).all()
+                        if pack.external_url
+                    ]
+                    if links:
+                        response += "\n" + "\n".join(links)
+                return response

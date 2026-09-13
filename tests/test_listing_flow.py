@@ -444,3 +444,33 @@ def test_api_path_plans_and_publishes_without_imessage(tmp_path: Path) -> None:
         assert result["outcomes"]["ebay"]["status"] == "failed"
         packs = client.get(f"/api/items/{item_id}/packs").json()
         assert {pack["status"] for pack in packs} == {"failed", "handoff_ready"}
+
+
+def test_status_resends_the_live_link_after_listing(tmp_path: Path) -> None:
+    """The link is texted once at publish; status must be able to give it back."""
+    from app.models import ListingPack, ListingPackStatus
+
+    adapter = FakeMessageAdapter()
+    settings = make_settings(
+        tmp_path,
+        public_base_url="https://demo.example.com",
+        ebay_demo_mode=True,
+    )
+    app = create_app(settings, photo_editor=FakePhotoEditor(), message_adapter=adapter)
+    with TestClient(app) as client:
+        send(client, "s1", "INIU portable power bank", with_photo=True)
+        send(client, "s2", "approve")
+        send(client, "s3", "good, just the item")
+        send(client, "s4", "1 day, you decide, ship, ebay only")
+        send(client, "s5", "yes")
+        with Session(app.state.engine) as session:
+            conversation = session.exec(select(SellerConversation)).one()
+            assert conversation.status == ConversationStatus.LISTED
+            pack = session.exec(select(ListingPack).where(ListingPack.channel == "ebay")).one()
+            assert pack.status == ListingPackStatus.PUBLISHED
+            assert pack.external_url and pack.external_url.startswith("https://demo.example.com")
+            link = pack.external_url
+
+        send(client, "s6", "status")
+        assert link in adapter.sent_texts[-1], adapter.sent_texts[-1]
+        assert "ebay:" in adapter.sent_texts[-1]
