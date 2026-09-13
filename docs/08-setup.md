@@ -25,8 +25,13 @@ The generated image remains in `review` until the seller approves it. The origin
 
 1. Install BlueBubbles Server from `bluebubbles.app` on the Mac signed into the agent Apple ID.
 2. Grant Full Disk Access and set a server password.
-3. Add `BB_SERVER_URL`, `BB_PASSWORD`, and `SELLER_HANDLE` to `.env`.
-4. Confirm a seller can send a text and photo to the agent account.
+3. Add `BB_SERVER_URL`, `BB_PASSWORD`, `BB_WEBHOOK_SECRET`, and `SELLER_HANDLE` to `.env`.
+4. Set `PUBLIC_BASE_URL` to the HTTPS URL that forwards to the local FastAPI server.
+5. Start Liquid with `uv run uvicorn app.main:app --reload`.
+6. Register the authenticated inbound webhook with
+   `uv run python scripts/register_bluebubbles_webhook.py`.
+7. Text a photo and caption from `SELLER_HANDLE`. Liquid accepts messages only from that handle.
+8. Confirm the original and enhanced photos arrive, then reply `APPROVE` or `REJECT`.
 
 ## 4. eBay
 

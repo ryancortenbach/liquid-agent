@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     openai_image_size: str = "1024x1024"
     bb_server_url: str = "http://localhost:1234"
     bb_password: str | None = None
+    bb_webhook_secret: str | None = None
     seller_handle: str | None = None
     ebay_client_id: str | None = None
     ebay_client_secret: str | None = None

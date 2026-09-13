@@ -68,6 +68,13 @@ class PhotoStatus(StrEnum):
     FAILED = "failed"
 
 
+class ConversationStatus(StrEnum):
+    READY = "ready"
+    PROCESSING_PHOTO = "processing_photo"
+    AWAITING_PHOTO_REVIEW = "awaiting_photo_review"
+    AWAITING_DETAILS = "awaiting_details"
+
+
 class Seller(SQLModel, table=True):
     id: str = Field(default_factory=new_id, primary_key=True)
     handle: str = Field(index=True, unique=True)
@@ -76,6 +83,21 @@ class Seller(SQLModel, table=True):
     from_address_json: dict[str, Any] = Field(
         default_factory=dict, sa_column=Column(JSON, nullable=False)
     )
+
+
+class SellerConversation(SQLModel, table=True):
+    id: str = Field(default_factory=new_id, primary_key=True)
+    seller_id: str = Field(foreign_key="seller.id", index=True, unique=True)
+    handle: str = Field(index=True, unique=True)
+    chat_guid: str
+    active_item_id: str | None = Field(default=None, foreign_key="item.id", index=True)
+    pending_photo_id: str | None = Field(
+        default=None,
+        foreign_key="productphoto.id",
+        index=True,
+    )
+    status: ConversationStatus = ConversationStatus.READY
+    updated_at: datetime = Field(default_factory=utc_now)
 
 
 class Item(SQLModel, table=True):

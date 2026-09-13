@@ -5,6 +5,7 @@ description = "Seller-only photo and marketplace agent for the Multi-App AI Agen
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "dateparser>=1.2.2",
   "fastapi>=0.116.0",
   "openai>=2.0.0",
   "pillow>=11.3.0",

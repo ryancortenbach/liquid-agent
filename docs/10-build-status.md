@@ -11,21 +11,22 @@ Updated 2026-09-13.
 - Local HEIC decoding and EXIF orientation normalization for iPhone photos
 - Generated photo records containing the source link, hash, model, prompt, preset, and disclosure
 - Mandatory seller review before an enhanced image can join the listing image set
+- Authenticated BlueBubbles webhook with sender allowlisting and event deduplication
+- Complete iMessage photo intake, enhancement preview, approval, rejection, and status flow
 - SQLite sale claims that pause duplicates and support confirmed or failed marketplace closes
 - Deadline pricing engine, guard, ledger, outbox, simulation, and evaluation artifacts
 - FastAPI item, photo enhancement, photo review, file, planning, tick, and ledger endpoints
-- 34 passing unit, API, property, clock, simulation, sale-claim, and photo tests
+- 38 passing unit, API, property, clock, simulation, sale-claim, photo, and iMessage tests
 
 ## Ordered P0 queue
 
 1. Add product identity and defect extraction before image editing.
 2. Add automated comparison checks between original and generated images.
-3. Connect BlueBubbles photo attachments to the enhancement endpoint.
-4. Build the seller's side-by-side approval card.
-5. Publish approved listing packs to the eBay sandbox.
-6. Build the assisted Facebook Marketplace publication flow.
-7. Add the outbox delivery worker and restart tests.
-8. Build the demo dashboard and recorded scenario.
+3. Complete a live BlueBubbles and OpenAI smoke test after credentials are configured.
+4. Publish approved listing packs to the eBay sandbox.
+5. Build the assisted Facebook Marketplace publication flow.
+6. Add the outbox delivery worker and restart tests.
+7. Build the demo dashboard and recorded scenario.
 
 ## Local setup blockers
 

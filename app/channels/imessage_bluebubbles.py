@@ -68,6 +68,24 @@ class BlueBubblesAdapter:
         response.raise_for_status()
         return True
 
+    async def register_webhook(self, url: str) -> dict[str, Any]:
+        response = await self._client.get(
+            f"{self.server_url}/api/v1/webhook",
+            params={"password": self.password},
+        )
+        response.raise_for_status()
+        existing = response.json().get("data") or []
+        if any(webhook.get("url") == url for webhook in existing):
+            return {"registered": False, "reason": "already_registered"}
+
+        response = await self._client.post(
+            f"{self.server_url}/api/v1/webhook",
+            params={"password": self.password},
+            json={"url": url, "events": ["new-message"]},
+        )
+        response.raise_for_status()
+        return {"registered": True, "webhook": response.json().get("data")}
+
     async def send_text(self, chat_guid: str, text: str, idempotency_key: str) -> None:
         response = await self._client.post(
             f"{self.server_url}/api/v1/message/text",
@@ -97,11 +115,15 @@ class BlueBubblesAdapter:
         response.raise_for_status()
 
     async def download_attachment(self, guid: str, destination: Path) -> Path:
+        content = await self.download_attachment_bytes(guid)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)
+        return destination
+
+    async def download_attachment_bytes(self, guid: str) -> bytes:
         response = await self._client.get(
             f"{self.server_url}/api/v1/attachment/{guid}/download",
             params={"password": self.password},
         )
         response.raise_for_status()
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(response.content)
-        return destination
+        return response.content

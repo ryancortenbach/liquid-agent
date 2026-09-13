@@ -1,16 +1,27 @@
 from __future__ import annotations
 
+import secrets
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.concurrency import run_in_threadpool
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import Engine
 from sqlmodel import Session, select
 
+from app.channels.imessage_bluebubbles import BlueBubblesAdapter
+from app.channels.seller_router import SellerMessageRouter
 from app.clock import Clock, DemoClock, RealClock, SimClock, utc_now
 from app.config import Mode, Settings, get_settings
 from app.db import ItemLocks, create_db_and_tables, make_engine
@@ -32,12 +43,18 @@ from app.models import (
     PhotoStatus,
     ProductPhoto,
     Seller,
+    WebhookReceipt,
 )
 from app.photos.editor import (
     OpenAIProductPhotoEditor,
     PhotoPreset,
     ProductPhotoEditor,
-    build_edit_prompt,
+)
+from app.photos.pipeline import (
+    PhotoEditError,
+    PhotoInputError,
+    PhotoItemNotFound,
+    enhance_product_photo,
 )
 from app.photos.storage import MAX_PHOTO_BYTES, PhotoStorage
 
@@ -126,6 +143,7 @@ def create_app(
     settings: Settings | None = None,
     *,
     photo_editor: ProductPhotoEditor | None = None,
+    message_adapter: BlueBubblesAdapter | None = None,
 ) -> FastAPI:
     app_settings = settings or get_settings()
 
@@ -144,13 +162,80 @@ def create_app(
                 quality=app_settings.openai_image_quality,
                 size=app_settings.openai_image_size,
             )
+        app.state.message_adapter = message_adapter
+        app.state.owns_message_adapter = False
+        if app.state.message_adapter is None and app_settings.bb_password:
+            app.state.message_adapter = BlueBubblesAdapter(
+                app_settings.bb_server_url,
+                app_settings.bb_password,
+            )
+            app.state.owns_message_adapter = True
+        app.state.seller_router = None
+        if app.state.message_adapter is not None and app_settings.seller_handle:
+            app.state.seller_router = SellerMessageRouter(
+                engine=app.state.engine,
+                clock=app.state.clock,
+                adapter=app.state.message_adapter,
+                editor=app.state.photo_editor,
+                storage=app.state.photo_storage,
+                seller_handle=app_settings.seller_handle,
+                timezone=app_settings.tz,
+            )
         yield
+        if app.state.owns_message_adapter and app.state.message_adapter is not None:
+            await app.state.message_adapter.close()
 
     app = FastAPI(title="Liquid", version="0.1.0", lifespan=lifespan)
 
     @app.get("/health")
     def health(clock: ClockDep) -> dict:
         return {"status": "ok", "mode": app_settings.mode, "sim_at": clock.now()}
+
+    async def process_bluebubbles_message(message) -> None:
+        router: SellerMessageRouter = app.state.seller_router
+        try:
+            await router.route(message)
+        except Exception:
+            with Session(app.state.engine) as session:
+                receipt = session.get(WebhookReceipt, ("bluebubbles", message.guid))
+                if receipt is not None:
+                    session.delete(receipt)
+                    session.commit()
+
+    @app.post("/webhooks/bluebubbles", status_code=202)
+    async def bluebubbles_webhook(
+        request: Request,
+        background_tasks: BackgroundTasks,
+        engine: EngineDep,
+        secret: str | None = None,
+    ) -> dict:
+        expected_secret = app_settings.bb_webhook_secret
+        if not expected_secret:
+            raise HTTPException(status_code=503, detail="BlueBubbles webhook is not configured")
+        if not secret or not secrets.compare_digest(secret, expected_secret):
+            raise HTTPException(status_code=401, detail="invalid webhook secret")
+        adapter: BlueBubblesAdapter | None = request.app.state.message_adapter
+        router: SellerMessageRouter | None = request.app.state.seller_router
+        if adapter is None or router is None:
+            raise HTTPException(status_code=503, detail="seller iMessage routing is not configured")
+        try:
+            payload = await request.json()
+            message = adapter.parse_inbound(payload)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail="invalid BlueBubbles payload") from exc
+        if message is None:
+            return {"status": "ignored"}
+        if not router.accepts(message):
+            return {"status": "ignored", "reason": "sender_not_allowed"}
+
+        with Session(engine) as session:
+            existing = session.get(WebhookReceipt, ("bluebubbles", message.guid))
+            if existing is not None:
+                return {"status": "duplicate"}
+            session.add(WebhookReceipt(provider="bluebubbles", event_id=message.guid))
+            session.commit()
+        background_tasks.add_task(process_bluebubbles_message, message)
+        return {"status": "queued"}
 
     @app.post("/api/plan")
     def plan(body: PlanRequest, clock: ClockDep) -> dict:
@@ -279,91 +364,31 @@ def create_app(
                 detail="OpenAI image editing is not configured",
             )
 
-        with Session(engine) as session:
-            if session.get(Item, item_id) is None:
-                raise HTTPException(status_code=404, detail="item not found")
-
         content = await upload.read(MAX_PHOTO_BYTES + 1)
         storage: PhotoStorage = request.app.state.photo_storage
         try:
-            stored = storage.save_original(item_id, content, upload.content_type or "")
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        try:
-            edit_source = storage.normalize_for_edit(stored)
-        except ValueError as exc:
-            stored.absolute_path.unlink(missing_ok=True)
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-        with Session(engine) as session:
-            item = session.get(Item, item_id)
-            if item is None:
-                stored.absolute_path.unlink(missing_ok=True)
-                raise HTTPException(status_code=404, detail="item not found")
-            prompt = build_edit_prompt(item, preset)
-            original = ProductPhoto(
-                item_id=item.id,
-                role=PhotoRole.ORIGINAL,
-                status=PhotoStatus.ORIGINAL,
-                file_path=stored.relative_path,
-                mime_type=stored.mime_type,
-                sha256=stored.sha256,
+            result = await enhance_product_photo(
+                engine=engine,
+                item_id=item_id,
+                content=content,
+                mime_type=upload.content_type or "",
+                preset=preset,
+                editor=editor,
+                storage=storage,
             )
-            session.add(original)
-            session.flush()
-            target = storage.enhanced_path(item.id, original.id)
-            enhanced = ProductPhoto(
-                item_id=item.id,
-                source_photo_id=original.id,
-                role=PhotoRole.ENHANCED,
-                status=PhotoStatus.PROCESSING,
-                file_path=target.relative_path,
-                mime_type="image/png",
-                sha256="pending",
-                preset=preset.value,
-                prompt=prompt,
-                model=editor.model,
-                disclosure="AI-enhanced lighting and background. Original image retained.",
-            )
-            session.add(enhanced)
-            item.photo_paths = [*item.photo_paths, original.file_path]
-            session.add(item)
-            session.commit()
-            original_id = original.id
-            enhanced_id = enhanced.id
-
-        try:
-            await run_in_threadpool(editor.edit, edit_source, target.absolute_path, prompt)
-            if not target.absolute_path.exists() or target.absolute_path.stat().st_size == 0:
-                raise RuntimeError("image editor produced an empty output")
-        except Exception as exc:
-            target.absolute_path.unlink(missing_ok=True)
-            with Session(engine) as session:
-                failed = session.get(ProductPhoto, enhanced_id)
-                if failed is not None:
-                    failed.status = PhotoStatus.FAILED
-                    failed.failure_reason = type(exc).__name__
-                    session.add(failed)
-                    session.commit()
-            raise HTTPException(status_code=502, detail="image enhancement failed") from exc
-        finally:
-            edit_source.unlink(missing_ok=True)
-
-        with Session(engine) as session:
-            ready = session.get(ProductPhoto, enhanced_id)
-            if ready is None:
-                raise HTTPException(status_code=500, detail="photo record was lost")
-            ready.status = PhotoStatus.REVIEW
-            ready.sha256 = storage.sha256_file(target.absolute_path)
-            session.add(ready)
-            session.commit()
+        except PhotoItemNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except PhotoInputError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except PhotoEditError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
         return {
-            "original_photo_id": original_id,
-            "enhanced_photo_id": enhanced_id,
+            "original_photo_id": result.original.id,
+            "enhanced_photo_id": result.enhanced.id,
             "status": PhotoStatus.REVIEW,
-            "original_url": f"/api/photos/{original_id}/file",
-            "enhanced_url": f"/api/photos/{enhanced_id}/file",
+            "original_url": f"/api/photos/{result.original.id}/file",
+            "enhanced_url": f"/api/photos/{result.enhanced.id}/file",
             "requires_seller_approval": True,
             "disclosure": "AI-enhanced lighting and background. Original image retained.",
         }

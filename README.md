@@ -48,6 +48,7 @@ analysis, listing copy, and seller messages.
 | [docs/08-setup.md](docs/08-setup.md) | Accounts, keys, and local setup |
 | [docs/09-brief-template.md](docs/09-brief-template.md) | Submission brief template |
 | [docs/10-build-status.md](docs/10-build-status.md) | Current implementation and next work |
+| [docs/11-collaboration.md](docs/11-collaboration.md) | Independent branch workflow for collaborators |
 
 ## Local development
 
@@ -65,3 +66,7 @@ For the photo flow, set `OPENAI_API_KEY`, upload an image to
 `POST /api/items/{item_id}/photos/enhance`, compare the returned original and enhanced URLs, then
 approve or reject it through `POST /api/items/{item_id}/photos/{photo_id}/review`. Enhanced photos
 never enter the listing image set before approval.
+
+For iMessage, configure BlueBubbles and the webhook values described in `docs/08-setup.md`. A
+seller can then text a photo and caption, receive the original and enhanced versions, and reply
+`APPROVE` or `REJECT` without using the API directly.
