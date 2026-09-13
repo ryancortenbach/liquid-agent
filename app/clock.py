@@ -80,9 +80,9 @@ class DemoClock:
             raise ValueError("demo clock cannot move backward")
         with self._lock:
             self._sim_anchor += delta
-            return self.now() if self._paused_at is None else self._sim_anchor + timedelta(
-                seconds=(self._paused_at - self._wall_anchor).total_seconds() * self._speed
-            )
+            wall = self._paused_at or require_aware(self._wall_fn())
+            elapsed = (wall - self._wall_anchor).total_seconds() * self._speed
+            return self._sim_anchor + timedelta(seconds=elapsed)
 
     def resume(self) -> datetime:
         with self._lock:

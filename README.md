@@ -74,3 +74,37 @@ seller can then text a photo and caption, receive the original and enhanced vers
 The eBay sandbox path is `POST /api/items/{item_id}/publish/ebay`. It creates a draft from approved
 photos first. The offer is published only when the request explicitly includes
 `"seller_approved": true`, and Liquid marks it live only after eBay returns a listing id.
+
+## Submission
+
+- **What we built.** Liquid, a seller-only listing agent that lives in iMessage. Text a photo and a
+  sentence; it identifies the item, makes a truthful listing photo, asks two short questions, pulls
+  sold and active comps, prices for the deadline you chose, writes the listing, shows you a card
+  with every source, publishes to eBay on "go", hands you copy-ready posts for Facebook Marketplace
+  and OfferUp, and steps the price down your schedule as time passes.
+- **One orchestrator.** The seller router and listing flow orchestrate every step; vision, research,
+  pricing, listing copy, and publishing are tools it calls in sequence with a ledger row each.
+- **External apps.** iMessage through BlueBubbles, OpenAI for the truthful photo edit, Apify's eBay
+  sold and active listing actors for comps, eBay (Browse API in production for comps, Sell API in
+  the sandbox for publishing and repricing), Claude for identification, parsing, and copy. Sandbox
+  and test environments are used where a marketplace offers them.
+- **Demo video (2 minutes).** _link to be added before submission_
+- **Run it.** `uv sync --all-extras`, copy `.env.example` to `.env`, then `uv run uvicorn app.main:app`.
+  Open `/dashboard`. Without iMessage: `uv run python demo/run_demo.py --photo photo.jpg` drives the
+  whole path over the API. `uv run python scripts/smoke_research.py "iPad Air 5th gen 64GB"` checks
+  the comps sources.
+
+## How we test reliability
+
+- `uv run pytest`: unit, API, property (Hypothesis), clock, simulation, sale-claim, photo, iMessage,
+  research, pricing, intake, listing-flow, repricing, and dashboard tests.
+- **Invariants enforced in code**: no listing price below the seller's floor; nothing publishes
+  without the seller's "go"; the enhanced photo never replaces the original and needs approval;
+  every price and claim traces to a ledger row with its sources; publishing is idempotent.
+- **Simulation**: `sim/` runs the deadline pricing engine against a seeded market and writes
+  `docs/eval/results.md`; the same engine prices real items.
+- **Honest labeling**: offline comps are marked "offline sample data" on the card; the eBay pack is
+  marked failed with the reason when the sandbox is not configured, never silently skipped.
+- **Known limitations**: Facebook Marketplace and OfferUp have no posting APIs, so those are
+  copy-ready handoffs the seller pastes; eBay sold data is scraped through Apify rather than an
+  official API; identification needs a clear photo of the actual item.
