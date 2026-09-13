@@ -4,7 +4,6 @@ import secrets
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Annotated
-from urllib.parse import urlparse
 
 from fastapi import (
     BackgroundTasks,
@@ -32,19 +31,24 @@ from app.engine.frontier import compute_frontier
 from app.engine.load_state import load_state
 from app.engine.policy import decide
 from app.engine.state import ItemState, default_channels
+from app.intake.details import IntakeDetails, merge_details
+from app.intake.flow import ListingFlow, pack_dict
+from app.intake.router import PipelineRouter
 from app.ledger import write_decision
+from app.listing.draft import polish_with_claude
+from app.market import publish_service
 from app.market.ebay import (
-    EbayError,
-    EbayOfferInput,
     EbayPublisher,
     EbaySandboxClient,
 )
 from app.market.fees import instant_quote_cents
+from app.market.publish_service import EbayPublishError
 from app.models import (
     Item,
     ItemStatus,
     LedgerEvent,
     Listing,
+    ListingPack,
     ListingStatus,
     PhotoRole,
     PhotoStatus,
@@ -64,6 +68,7 @@ from app.photos.pipeline import (
     enhance_product_photo,
 )
 from app.photos.storage import MAX_PHOTO_BYTES, PhotoStorage
+from app.research.factory import build_comps_sources
 
 
 class PlanRequest(BaseModel):
@@ -85,6 +90,14 @@ class CreateItemRequest(PlanRequest):
 
 class PhotoReviewRequest(BaseModel):
     approved: bool
+
+
+class DetailsRequest(BaseModel):
+    text: str
+
+
+class PlanListingRequest(BaseModel):
+    research: bool = True
 
 
 class EbayListingRequest(BaseModel):
@@ -212,6 +225,31 @@ def create_app(
                 app_settings.ebay_sb_refresh_token or "",
             )
             app.state.owns_ebay_publisher = True
+        app.state.comps_sources = build_comps_sources(app_settings)
+        polish = (
+            (
+                lambda draft: polish_with_claude(
+                    draft,
+                    api_key=app_settings.anthropic_api_key or "",
+                    model=app_settings.claude_model,
+                )
+            )
+            if app_settings.anthropic_api_key
+            else None
+        )
+        app.state.listing_flow = ListingFlow(
+            engine=app.state.engine,
+            clock=app.state.clock,
+            settings=app_settings,
+            comps_sources=app.state.comps_sources,
+            adapter=app.state.message_adapter,
+            ebay_publisher=app.state.ebay_publisher,
+            polish=polish,
+        )
+        if app.state.seller_router is not None:
+            app.state.seller_router = PipelineRouter(
+                app.state.seller_router, app.state.listing_flow
+            )
         yield
         if app.state.owns_message_adapter and app.state.message_adapter is not None:
             await app.state.message_adapter.close()
@@ -390,158 +428,68 @@ def create_app(
         engine: EngineDep,
         clock: ClockDep,
     ) -> dict:
-        publisher: EbayPublisher | None = request.app.state.ebay_publisher
-        if publisher is None:
-            raise HTTPException(status_code=503, detail="eBay sandbox is not configured")
-
-        required_settings = {
-            "merchant location": app_settings.ebay_sb_merchant_location_key,
-            "payment policy": app_settings.ebay_sb_payment_policy_id,
-            "return policy": app_settings.ebay_sb_return_policy_id,
-            "fulfillment policy": app_settings.ebay_sb_fulfillment_policy_id,
-        }
-        missing = [name for name, value in required_settings.items() if not value]
-        category_id = body.category_id or app_settings.ebay_sb_default_category_id
-        if not category_id:
-            missing.append("category")
-        if missing:
-            raise HTTPException(
-                status_code=503,
-                detail=f"eBay sandbox setup is missing: {', '.join(missing)}",
+        try:
+            result = await publish_service.publish_item_to_ebay(
+                engine=engine,
+                settings=app_settings,
+                publisher=request.app.state.ebay_publisher,
+                clock=clock,
+                item_id=item_id,
+                seller_approved=body.seller_approved,
+                price_cents=body.price_cents,
+                category_id=body.category_id,
+                description=body.description,
+                aspects=body.aspects,
             )
-        if not body.aspects:
-            raise HTTPException(
-                status_code=422,
-                detail="at least one truthful item aspect is required",
-            )
+        except EbayPublishError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        return result.as_dict()
 
-        public_url = urlparse(app_settings.public_base_url)
-        if public_url.scheme != "https" or public_url.hostname in {"localhost", "127.0.0.1"}:
-            raise HTTPException(
-                status_code=503,
-                detail="PUBLIC_BASE_URL must be a public HTTPS URL for eBay images",
-            )
-
+    @app.post("/api/items/{item_id}/details")
+    def add_details(item_id: str, body: DetailsRequest, engine: EngineDep) -> dict:
         with Session(engine) as session:
             item = session.get(Item, item_id)
             if item is None:
                 raise HTTPException(status_code=404, detail="item not found")
-            approved_photos = session.exec(
-                select(ProductPhoto).where(
-                    ProductPhoto.item_id == item_id,
-                    ProductPhoto.status == PhotoStatus.APPROVED,
-                )
-            ).all()
-            if not approved_photos:
-                raise HTTPException(
-                    status_code=409,
-                    detail="approve at least one enhanced photo before preparing an eBay listing",
-                )
-            listing = session.exec(
-                select(Listing).where(Listing.item_id == item_id, Listing.channel == "ebay")
-            ).first()
-            if listing is not None and listing.external_id and listing.status == ListingStatus.LIVE:
-                return {
-                    "status": "live",
-                    "listing_id": listing.external_id,
-                    "seller_approved": True,
-                }
-            price_cents = body.price_cents or (listing.price_cents if listing else 0)
-            if price_cents <= 0:
-                price_cents = item.market_value_cents
-            offer_id = (
-                listing.external_id if listing and listing.status == ListingStatus.DRAFT else None
+            asked = list(item.constraints_json.get("intake_asked") or [])
+            details = merge_details(
+                IntakeDetails.from_dict(item.constraints_json.get("intake")),
+                body.text,
+                answered_set="api",
             )
-            offer = EbayOfferInput(
-                sku=f"liquid-{item.id}",
-                title=item.title[:80],
-                description=body.description or f"{item.title}. Seller-provided item photo.",
-                condition={
-                    "A": "USED_EXCELLENT",
-                    "B": "USED_VERY_GOOD",
-                    "C": "USED_ACCEPTABLE",
-                }[item.condition.value],
-                aspects=body.aspects,
-                image_urls=[
-                    f"{app_settings.public_base_url.rstrip('/')}/api/photos/{photo.id}/file"
-                    for photo in approved_photos
-                ],
-                category_id=category_id or "",
-                marketplace_id=app_settings.ebay_marketplace_id,
-                currency=app_settings.ebay_currency,
-                price_cents=price_cents,
-                merchant_location_key=app_settings.ebay_sb_merchant_location_key or "",
-                payment_policy_id=app_settings.ebay_sb_payment_policy_id or "",
-                return_policy_id=app_settings.ebay_sb_return_policy_id or "",
-                fulfillment_policy_id=app_settings.ebay_sb_fulfillment_policy_id or "",
-            )
-
-        try:
-            if offer_id is None:
-                draft = await publisher.create_draft(offer)
-                offer_id = draft.offer_id
-                with Session(engine) as session:
-                    listing = session.exec(
-                        select(Listing).where(
-                            Listing.item_id == item_id,
-                            Listing.channel == "ebay",
-                        )
-                    ).first()
-                    if listing is None:
-                        listing = Listing(
-                            item_id=item_id,
-                            channel="ebay",
-                            price_cents=price_cents,
-                        )
-                    listing.external_id = offer_id
-                    listing.price_cents = price_cents
-                    listing.status = ListingStatus.DRAFT
-                    session.add(listing)
-                    session.commit()
-            if not body.seller_approved:
-                return {
-                    "status": "draft",
-                    "offer_id": offer_id,
-                    "seller_approved": False,
-                }
-            publication = await publisher.publish(offer_id, app_settings.ebay_marketplace_id)
-        except EbayError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-        with Session(engine) as session:
-            item = session.get(Item, item_id)
-            listing = session.exec(
-                select(Listing).where(Listing.item_id == item_id, Listing.channel == "ebay")
-            ).one()
-            listing.external_id = publication.listing_id
-            listing.status = ListingStatus.LIVE
-            listing.published_at = clock.now()
-            if item is not None:
-                item.status = ItemStatus.LIVE
-                session.add(item)
-            session.add(listing)
-            write_decision(
-                session,
-                item_id=item_id,
-                sim_at=clock.now(),
-                wall_at=clock.wall(),
-                kind="seller",
-                action="publish_ebay",
-                inputs={
-                    "listing_id": publication.listing_id,
-                    "price_cents": listing.price_cents,
-                    "marketplace_id": app_settings.ebay_marketplace_id,
-                },
-                reason="seller approved publication to the eBay sandbox",
-                price_before=None,
-                price_after=listing.price_cents,
-            )
+            item.constraints_json = {
+                **item.constraints_json,
+                "intake": details.as_dict(),
+                "intake_asked": asked,
+            }
+            session.add(item)
             session.commit()
-        return {
-            "status": "live",
-            "listing_id": publication.listing_id,
-            "seller_approved": True,
-        }
+            return details.as_dict()
+
+    @app.post("/api/items/{item_id}/plan-listing")
+    async def plan_listing(item_id: str, body: PlanListingRequest, request: Request) -> dict:
+        flow: ListingFlow = request.app.state.listing_flow
+        try:
+            result = await flow.plan(item_id, research=body.research)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return result.as_dict()
+
+    @app.post("/api/items/{item_id}/go")
+    async def go(item_id: str, request: Request) -> dict:
+        flow: ListingFlow = request.app.state.listing_flow
+        try:
+            return await flow.publish(item_id)
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/items/{item_id}/packs")
+    def list_packs(item_id: str, engine: EngineDep) -> list[dict]:
+        with Session(engine) as session:
+            if session.get(Item, item_id) is None:
+                raise HTTPException(status_code=404, detail="item not found")
+            packs = session.exec(select(ListingPack).where(ListingPack.item_id == item_id)).all()
+            return [pack_dict(pack) for pack in packs]
 
     @app.post("/api/items/{item_id}/photos/enhance", status_code=201)
     async def enhance_photo(

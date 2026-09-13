@@ -134,7 +134,11 @@ def test_imessage_photo_preview_approval_and_deduplication(tmp_path: Path) -> No
             json=message_payload(guid="message-2", text="APPROVE"),
         )
         assert approval.json()["status"] == "queued"
-        assert adapter.sent_texts[-1].startswith("Approved")
+        approved_index = next(
+            index for index, text in enumerate(adapter.sent_texts) if text.startswith("Approved")
+        )
+        # the listing flow asks its first question right after the photo review
+        assert adapter.sent_texts[approved_index + 1].startswith("two quick things")
 
         with Session(app.state.engine) as session:
             assert session.get(ProductPhoto, enhanced_id).status == PhotoStatus.APPROVED

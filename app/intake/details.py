@@ -52,17 +52,25 @@ class IntakeDetails:
         return ConditionGrade(self.condition or "B")
 
 
-def parse_condition(text: str) -> tuple[str | None, list[str]]:
+def parse_condition(text: str, *, allow_digits: bool = False) -> tuple[str | None, list[str]]:
+    """Grade from words anywhere; a bare 1-4 only counts as an answer to the condition question."""
     lowered = text.lower()
     issues: list[str] = []
-    if re.search(r"\b(broken|for parts|doesn'?t (?:turn on|work)|4)\b", lowered):
+    digit = re.match(r"\s*([1-4])\b", lowered) if allow_digits else None
+    if re.search(r"\b(broken|for parts|doesn'?t (?:turn on|work))\b", lowered) or (
+        digit and digit.group(1) == "4"
+    ):
         issues.append("for parts or repair")
         return "C", issues
-    if re.search(r"\b(like new|mint|excellent|flawless|1)\b", lowered):
+    if re.search(r"\b(like new|mint|excellent|flawless)\b", lowered) or (
+        digit and digit.group(1) == "1"
+    ):
         return "A", issues
-    if re.search(r"\b(fair|visible|heavy|rough|3)\b", lowered):
+    if re.search(r"\b(fair|visible|heavy|rough)\b", lowered) or (digit and digit.group(1) == "3"):
         return "C", issues
-    if re.search(r"\b(good|light wear|lightly used|minor|2)\b", lowered):
+    if re.search(r"\b(good|light wear|lightly used|minor)\b", lowered) or (
+        digit and digit.group(1) == "2"
+    ):
         return "B", issues
     return None, issues
 
@@ -136,7 +144,7 @@ def parse_included_and_issues(text: str) -> tuple[list[str], list[str]]:
 
 def merge_details(existing: IntakeDetails, text: str, *, answered_set: str) -> IntakeDetails:
     details = IntakeDetails.from_dict(existing.as_dict())
-    condition, condition_issues = parse_condition(text)
+    condition, condition_issues = parse_condition(text, allow_digits=answered_set == "condition")
     if condition:
         details.condition = condition
     included, issues = parse_included_and_issues(text)
