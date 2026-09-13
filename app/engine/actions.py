@@ -13,7 +13,8 @@ class ActionKind(StrEnum):
     ESCALATE = "escalate"
     ROUTE_INSTANT = "route_instant"
     EXPIRE = "expire"
-    PAYMENT_TIMEOUT = "payment_timeout"
+    CONFIRM_SALE = "confirm_sale"
+    RELEASE_SALE = "release_sale"
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +49,7 @@ class Counter(Action):
 class Accept(Action):
     offer_id: str = ""
     buyer_id: str = ""
+    channel: str = ""
     amount_cents: int = 0
     kind: ClassVar[ActionKind] = ActionKind.ACCEPT
 
@@ -70,9 +72,19 @@ class Expire(Action):
 
 
 @dataclass(frozen=True, slots=True)
-class PaymentTimeout(Action):
-    checkout_id: str = ""
-    kind: ClassVar[ActionKind] = ActionKind.PAYMENT_TIMEOUT
+class ConfirmSale(Action):
+    claim_id: str = ""
+    channel: str = ""
+    external_reference: str | None = None
+    source: str = ""
+    kind: ClassVar[ActionKind] = ActionKind.CONFIRM_SALE
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseSale(Action):
+    claim_id: str = ""
+    source: str = ""
+    kind: ClassVar[ActionKind] = ActionKind.RELEASE_SALE
 
 
 PriceAction = Reprice | Counter | Accept | RouteInstant

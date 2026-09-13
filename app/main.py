@@ -4,7 +4,9 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import Engine
 from sqlmodel import Session, select
@@ -20,7 +22,24 @@ from app.engine.policy import decide
 from app.engine.state import ItemState, default_channels
 from app.ledger import write_decision
 from app.market.fees import instant_quote_cents
-from app.models import Item, ItemStatus, LedgerEvent, Listing, ListingStatus, Seller
+from app.models import (
+    Item,
+    ItemStatus,
+    LedgerEvent,
+    Listing,
+    ListingStatus,
+    PhotoRole,
+    PhotoStatus,
+    ProductPhoto,
+    Seller,
+)
+from app.photos.editor import (
+    OpenAIProductPhotoEditor,
+    PhotoPreset,
+    ProductPhotoEditor,
+    build_edit_prompt,
+)
+from app.photos.storage import MAX_PHOTO_BYTES, PhotoStorage
 
 
 class PlanRequest(BaseModel):
@@ -38,6 +57,10 @@ class CreateItemRequest(PlanRequest):
     brand: str | None = None
     model: str | None = None
     opening_price_cents: int | None = Field(default=None, gt=0)
+
+
+class PhotoReviewRequest(BaseModel):
+    approved: bool
 
 
 def build_clock(settings: Settings) -> Clock:
@@ -99,7 +122,11 @@ ClockDep = Annotated[Clock, Depends(get_clock)]
 ItemLocksDep = Annotated[ItemLocks, Depends(get_item_locks)]
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    photo_editor: ProductPhotoEditor | None = None,
+) -> FastAPI:
     app_settings = settings or get_settings()
 
     @asynccontextmanager
@@ -108,6 +135,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         create_db_and_tables(app.state.engine)
         app.state.clock = build_clock(app_settings)
         app.state.item_locks = ItemLocks()
+        app.state.photo_storage = PhotoStorage(app_settings.photo_storage_dir)
+        app.state.photo_editor = photo_editor
+        if app.state.photo_editor is None and app_settings.openai_api_key:
+            app.state.photo_editor = OpenAIProductPhotoEditor(
+                app_settings.openai_api_key,
+                model=app_settings.openai_image_model,
+                quality=app_settings.openai_image_quality,
+                size=app_settings.openai_image_size,
+            )
         yield
 
     app = FastAPI(title="Liquid", version="0.1.0", lifespan=lifespan)
@@ -164,7 +200,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             session.flush()
             listing = Listing(
                 item_id=item.id,
-                channel="local",
+                channel="ebay",
                 price_cents=opening,
                 status=ListingStatus.LIVE,
                 published_at=now,
@@ -227,6 +263,177 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     .order_by(LedgerEvent.sim_at)
                 ).all()
             )
+
+    @app.post("/api/items/{item_id}/photos/enhance", status_code=201)
+    async def enhance_photo(
+        item_id: str,
+        request: Request,
+        engine: EngineDep,
+        upload: Annotated[UploadFile, File()],
+        preset: Annotated[PhotoPreset, Form()] = PhotoPreset.STUDIO,
+    ) -> dict:
+        editor: ProductPhotoEditor | None = request.app.state.photo_editor
+        if editor is None:
+            raise HTTPException(
+                status_code=503,
+                detail="OpenAI image editing is not configured",
+            )
+
+        with Session(engine) as session:
+            if session.get(Item, item_id) is None:
+                raise HTTPException(status_code=404, detail="item not found")
+
+        content = await upload.read(MAX_PHOTO_BYTES + 1)
+        storage: PhotoStorage = request.app.state.photo_storage
+        try:
+            stored = storage.save_original(item_id, content, upload.content_type or "")
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        try:
+            edit_source = storage.normalize_for_edit(stored)
+        except ValueError as exc:
+            stored.absolute_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        with Session(engine) as session:
+            item = session.get(Item, item_id)
+            if item is None:
+                stored.absolute_path.unlink(missing_ok=True)
+                raise HTTPException(status_code=404, detail="item not found")
+            prompt = build_edit_prompt(item, preset)
+            original = ProductPhoto(
+                item_id=item.id,
+                role=PhotoRole.ORIGINAL,
+                status=PhotoStatus.ORIGINAL,
+                file_path=stored.relative_path,
+                mime_type=stored.mime_type,
+                sha256=stored.sha256,
+            )
+            session.add(original)
+            session.flush()
+            target = storage.enhanced_path(item.id, original.id)
+            enhanced = ProductPhoto(
+                item_id=item.id,
+                source_photo_id=original.id,
+                role=PhotoRole.ENHANCED,
+                status=PhotoStatus.PROCESSING,
+                file_path=target.relative_path,
+                mime_type="image/png",
+                sha256="pending",
+                preset=preset.value,
+                prompt=prompt,
+                model=editor.model,
+                disclosure="AI-enhanced lighting and background. Original image retained.",
+            )
+            session.add(enhanced)
+            item.photo_paths = [*item.photo_paths, original.file_path]
+            session.add(item)
+            session.commit()
+            original_id = original.id
+            enhanced_id = enhanced.id
+
+        try:
+            await run_in_threadpool(editor.edit, edit_source, target.absolute_path, prompt)
+            if not target.absolute_path.exists() or target.absolute_path.stat().st_size == 0:
+                raise RuntimeError("image editor produced an empty output")
+        except Exception as exc:
+            target.absolute_path.unlink(missing_ok=True)
+            with Session(engine) as session:
+                failed = session.get(ProductPhoto, enhanced_id)
+                if failed is not None:
+                    failed.status = PhotoStatus.FAILED
+                    failed.failure_reason = type(exc).__name__
+                    session.add(failed)
+                    session.commit()
+            raise HTTPException(status_code=502, detail="image enhancement failed") from exc
+        finally:
+            edit_source.unlink(missing_ok=True)
+
+        with Session(engine) as session:
+            ready = session.get(ProductPhoto, enhanced_id)
+            if ready is None:
+                raise HTTPException(status_code=500, detail="photo record was lost")
+            ready.status = PhotoStatus.REVIEW
+            ready.sha256 = storage.sha256_file(target.absolute_path)
+            session.add(ready)
+            session.commit()
+
+        return {
+            "original_photo_id": original_id,
+            "enhanced_photo_id": enhanced_id,
+            "status": PhotoStatus.REVIEW,
+            "original_url": f"/api/photos/{original_id}/file",
+            "enhanced_url": f"/api/photos/{enhanced_id}/file",
+            "requires_seller_approval": True,
+            "disclosure": "AI-enhanced lighting and background. Original image retained.",
+        }
+
+    @app.post("/api/items/{item_id}/photos/{photo_id}/review")
+    def review_photo(
+        item_id: str,
+        photo_id: str,
+        body: PhotoReviewRequest,
+        engine: EngineDep,
+        clock: ClockDep,
+    ) -> dict:
+        with Session(engine) as session:
+            item = session.get(Item, item_id)
+            photo = session.get(ProductPhoto, photo_id)
+            if item is None or photo is None or photo.item_id != item_id:
+                raise HTTPException(status_code=404, detail="photo not found")
+            if photo.role != PhotoRole.ENHANCED or photo.status != PhotoStatus.REVIEW:
+                raise HTTPException(status_code=409, detail="photo is not awaiting review")
+
+            photo.status = PhotoStatus.APPROVED if body.approved else PhotoStatus.REJECTED
+            photo.reviewed_at = clock.now()
+            if body.approved and photo.file_path not in item.photo_paths:
+                item.photo_paths = [*item.photo_paths, photo.file_path]
+                session.add(item)
+            session.add(photo)
+            write_decision(
+                session,
+                item_id=item.id,
+                sim_at=clock.now(),
+                wall_at=clock.wall(),
+                kind="seller",
+                action="approve_photo" if body.approved else "reject_photo",
+                inputs={"photo_id": photo.id, "preset": photo.preset},
+                reason="seller reviewed the AI-enhanced image",
+                price_before=None,
+                price_after=None,
+            )
+            session.commit()
+            return {"photo_id": photo.id, "status": photo.status}
+
+    @app.get("/api/items/{item_id}/photos")
+    def list_photos(item_id: str, engine: EngineDep) -> list[ProductPhoto]:
+        with Session(engine) as session:
+            if session.get(Item, item_id) is None:
+                raise HTTPException(status_code=404, detail="item not found")
+            return list(
+                session.exec(
+                    select(ProductPhoto)
+                    .where(ProductPhoto.item_id == item_id)
+                    .order_by(ProductPhoto.created_at)
+                ).all()
+            )
+
+    @app.get("/api/photos/{photo_id}/file")
+    def get_photo_file(photo_id: str, request: Request, engine: EngineDep) -> FileResponse:
+        with Session(engine) as session:
+            photo = session.get(ProductPhoto, photo_id)
+            if photo is None:
+                raise HTTPException(status_code=404, detail="photo not found")
+            if photo.status in {PhotoStatus.PROCESSING, PhotoStatus.FAILED}:
+                raise HTTPException(status_code=409, detail="photo file is not available")
+            storage: PhotoStorage = request.app.state.photo_storage
+            try:
+                path = storage.resolve(photo.file_path)
+            except ValueError as exc:
+                raise HTTPException(status_code=404, detail="photo not found") from exc
+            if not path.exists():
+                raise HTTPException(status_code=404, detail="photo file not found")
+            return FileResponse(path, media_type=photo.mime_type)
 
     return app
 

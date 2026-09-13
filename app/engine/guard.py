@@ -5,9 +5,10 @@ from datetime import datetime
 from app.engine.actions import (
     Accept,
     Action,
+    ConfirmSale,
     Counter,
     Expire,
-    PaymentTimeout,
+    ReleaseSale,
     Reprice,
     RouteInstant,
 )
@@ -23,7 +24,7 @@ def check(action: Action, state: ItemState, now: datetime) -> None:
     price = None
     if isinstance(action, Reprice | Counter):
         price = action.price_cents
-    elif isinstance(action, Accept | RouteInstant):
+    elif isinstance(action, Accept):
         price = action.amount_cents
 
     if price is not None and price < state.floor_cents:
@@ -46,8 +47,8 @@ def check(action: Action, state: ItemState, now: datetime) -> None:
     if isinstance(action, Accept):
         if now >= state.deadline_at:
             raise InvariantViolation("I3: cannot accept after the deadline")
-        if state.checkout is not None:
-            raise InvariantViolation("I2: an open checkout already exists")
+        if state.active_sale_claim is not None:
+            raise InvariantViolation("I2: an active marketplace sale claim already exists")
         if state.status not in {ItemStatus.LIVE, ItemStatus.ESCALATED}:
             raise InvariantViolation("I2: item is not available for acceptance")
 
@@ -66,11 +67,19 @@ def check(action: Action, state: ItemState, now: datetime) -> None:
     ):
         raise InvariantViolation("instant exit is not preauthorized")
 
-    if isinstance(action, PaymentTimeout):
-        if state.status != ItemStatus.PENDING_PAYMENT or state.checkout is None:
-            raise InvariantViolation("payment timeout requires an open checkout")
-        if action.checkout_id != state.checkout.id:
-            raise InvariantViolation("payment timeout targets the wrong checkout")
+    if isinstance(action, ConfirmSale):
+        if state.status != ItemStatus.SALE_PENDING or state.active_sale_claim is None:
+            raise InvariantViolation("sale confirmation requires an active marketplace claim")
+        if action.claim_id != state.active_sale_claim.id:
+            raise InvariantViolation("sale confirmation targets the wrong claim")
+        if action.source not in {"marketplace_webhook", "seller_confirmation"}:
+            raise InvariantViolation("sale confirmation source is not trusted")
+
+    if isinstance(action, ReleaseSale):
+        if state.status != ItemStatus.SALE_PENDING or state.active_sale_claim is None:
+            raise InvariantViolation("sale release requires an active marketplace claim")
+        if action.claim_id != state.active_sale_claim.id:
+            raise InvariantViolation("sale release targets the wrong claim")
 
     if isinstance(action, Expire) and now < state.deadline_at:
         raise InvariantViolation("cannot expire an item before its deadline")

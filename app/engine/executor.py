@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from sqlmodel import Session, select
 
 from app.engine.actions import (
     Accept,
     Action,
+    ConfirmSale,
     Counter,
     Escalate,
     Expire,
     Hold,
-    PaymentTimeout,
+    ReleaseSale,
     Reprice,
     RouteInstant,
 )
@@ -21,14 +22,15 @@ from app.engine.state import ItemState
 from app.ids import new_id
 from app.ledger import write_decision
 from app.models import (
-    Checkout,
-    CheckoutStatus,
     Item,
     ItemStatus,
     Listing,
+    ListingStatus,
     Offer,
     OfferStatus,
     Outbox,
+    SaleClaim,
+    SaleClaimStatus,
 )
 
 
@@ -132,28 +134,44 @@ def apply_action(
         if offer is None or offer.item_id != state.item_id:
             raise LookupError(f"offer not found for item: {action.offer_id}")
         offer.status = OfferStatus.ACCEPTED
-        item.status = ItemStatus.PENDING_PAYMENT
-        window_hours = min(24, max(0.25, (state.deadline_at - now).total_seconds() / 14_400))
-        checkout = Checkout(
+        item.status = ItemStatus.SALE_PENDING
+        claim = SaleClaim(
             item_id=state.item_id,
-            buyer_id=action.buyer_id,
+            offer_id=action.offer_id,
+            channel=action.channel,
             amount_cents=action.amount_cents,
-            opened_at=now,
-            window_ends_at=now + timedelta(hours=window_hours),
+            claimed_at=now,
         )
         session.add(offer)
         session.add(item)
-        session.add(checkout)
+        session.add(claim)
+        listings = session.exec(
+            select(Listing).where(
+                Listing.item_id == state.item_id,
+                Listing.status == ListingStatus.LIVE,
+            )
+        ).all()
+        for listing in listings:
+            listing.status = ListingStatus.PAUSED
+            session.add(listing)
         _enqueue(
             session,
             action_id=action_id,
             item_id=state.item_id,
-            kind="issue_checkout",
+            kind="accept_marketplace_offer",
             payload={
-                "checkout_id": checkout.id,
+                "claim_id": claim.id,
                 "buyer_id": action.buyer_id,
+                "channel": action.channel,
                 "amount_cents": action.amount_cents,
             },
+        )
+        _enqueue(
+            session,
+            action_id=action_id,
+            item_id=state.item_id,
+            kind="pause_other_listings",
+            payload={"item_id": state.item_id, "winning_channel": action.channel},
         )
 
     elif isinstance(action, Escalate):
@@ -172,26 +190,68 @@ def apply_action(
             },
         )
 
-    elif isinstance(action, PaymentTimeout):
-        checkout = session.get(Checkout, action.checkout_id)
-        if checkout is None or checkout.status != CheckoutStatus.OPEN:
-            raise LookupError(f"open checkout not found: {action.checkout_id}")
-        checkout.status = CheckoutStatus.EXPIRED
-        item.status = ItemStatus.LIVE
-        session.add(checkout)
+    elif isinstance(action, ConfirmSale):
+        claim = session.get(SaleClaim, action.claim_id)
+        if claim is None or claim.status != SaleClaimStatus.ACTIVE:
+            raise LookupError(f"active sale claim not found: {action.claim_id}")
+        claim.status = SaleClaimStatus.CONFIRMED
+        claim.resolved_at = now
+        claim.resolution_source = action.source
+        claim.external_reference = action.external_reference
+        item.status = ItemStatus.SOLD
+        session.add(claim)
         session.add(item)
-        if checkout.stripe_session_id:
-            _enqueue(
-                session,
-                action_id=action_id,
-                item_id=state.item_id,
-                kind="expire_checkout",
-                payload={"stripe_session_id": checkout.stripe_session_id},
+        listings = session.exec(select(Listing).where(Listing.item_id == state.item_id)).all()
+        for listing in listings:
+            listing.status = ListingStatus.ENDED
+            session.add(listing)
+        price_after = claim.amount_cents
+        _enqueue(
+            session,
+            action_id=action_id,
+            item_id=state.item_id,
+            kind="end_other_listings",
+            payload={"item_id": state.item_id, "sold_channel": action.channel},
+        )
+
+    elif isinstance(action, ReleaseSale):
+        claim = session.get(SaleClaim, action.claim_id)
+        if claim is None or claim.status != SaleClaimStatus.ACTIVE:
+            raise LookupError(f"active sale claim not found: {action.claim_id}")
+        claim.status = SaleClaimStatus.RELEASED
+        claim.resolved_at = now
+        claim.resolution_source = action.source
+        item.status = ItemStatus.LIVE
+        offer = session.get(Offer, claim.offer_id)
+        if offer is not None:
+            offer.status = OfferStatus.SUPERSEDED
+            session.add(offer)
+        session.add(claim)
+        session.add(item)
+        listings = session.exec(
+            select(Listing).where(
+                Listing.item_id == state.item_id,
+                Listing.status == ListingStatus.PAUSED,
             )
+        ).all()
+        for listing in listings:
+            listing.status = ListingStatus.LIVE
+            session.add(listing)
+        _enqueue(
+            session,
+            action_id=action_id,
+            item_id=state.item_id,
+            kind="resume_listings",
+            payload={"item_id": state.item_id},
+        )
 
     elif isinstance(action, RouteInstant):
         item.status = ItemStatus.SOLD
         session.add(item)
+        listings = session.exec(select(Listing).where(Listing.item_id == state.item_id)).all()
+        for listing in listings:
+            listing.status = ListingStatus.ENDED
+            session.add(listing)
         price_after = action.amount_cents
         _enqueue(
             session,
@@ -199,6 +259,13 @@ def apply_action(
             item_id=state.item_id,
             kind="instant_exit",
             payload={"item_id": state.item_id, "amount_cents": action.amount_cents},
+        )
+        _enqueue(
+            session,
+            action_id=action_id,
+            item_id=state.item_id,
+            kind="end_other_listings",
+            payload={"item_id": state.item_id, "sold_channel": "instant"},
         )
 
     elif isinstance(action, Expire):

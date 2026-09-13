@@ -21,19 +21,19 @@ class StandingOffer:
     id: str
     buyer_id: str
     amount_cents: int
-    channel: str = "local"
-    pay_reliability: float = 0.85
+    channel: str = "facebook"
+    close_reliability: float = 0.85
     settlement_hours: float = 0.1
     answered: bool = False
-    buyer_failed: bool = False
+    buyer_failed_close: bool = False
 
 
 @dataclass(frozen=True, slots=True)
-class CheckoutState:
+class SaleClaimState:
     id: str
-    buyer_id: str
+    offer_id: str
+    channel: str
     amount_cents: int
-    window_ends_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,12 +53,12 @@ class ItemState:
     escalated_at: datetime | None = None
     channels: tuple[ChannelState, ...] = field(default_factory=tuple)
     offers: tuple[StandingOffer, ...] = field(default_factory=tuple)
-    checkout: CheckoutState | None = None
+    active_sale_claim: SaleClaimState | None = None
     interested_buyer_ids: tuple[str, ...] = field(default_factory=tuple)
 
 
 def default_channels() -> tuple[ChannelState, ...]:
     return (
-        ChannelState(name="local", prior_alpha=2, prior_beta_hours=24),
+        ChannelState(name="facebook", prior_alpha=2, prior_beta_hours=24),
         ChannelState(name="ebay", prior_alpha=4, prior_beta_hours=24),
     )

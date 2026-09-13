@@ -16,7 +16,9 @@ class ChannelEconomics:
 
 DEFAULT_ECONOMICS: dict[str, ChannelEconomics] = {
     "ebay": ChannelEconomics(fee_rate=0.1325, fixed_fee_cents=30, shipping_cents=1_200),
-    "local": ChannelEconomics(fee_rate=0.029, fixed_fee_cents=30, shipping_cents=0),
+    "facebook": ChannelEconomics(fee_rate=0, fixed_fee_cents=0, shipping_cents=0),
+    "craigslist": ChannelEconomics(fee_rate=0, fixed_fee_cents=0, shipping_cents=0),
+    "offerup": ChannelEconomics(fee_rate=0, fixed_fee_cents=0, shipping_cents=0),
     "instant": ChannelEconomics(fee_rate=0, fixed_fee_cents=0, shipping_cents=0),
 }
 

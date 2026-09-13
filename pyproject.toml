@@ -1,12 +1,16 @@
 [project]
 name = "liquid-agent"
 version = "0.1.0"
-description = "Deadline-native selling agent for the Multi-App AI Agent Hackathon"
+description = "Seller-only photo and marketplace agent for the Multi-App AI Agent Hackathon"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.116.0",
+  "openai>=2.0.0",
+  "pillow>=11.3.0",
+  "pillow-heif>=1.1.0",
   "pydantic-settings>=2.10.0",
+  "python-multipart>=0.0.20",
   "python-ulid>=3.0.0",
   "sqlmodel>=0.0.24",
   "uvicorn[standard]>=0.35.0",
@@ -23,7 +27,6 @@ integrations = [
   "pyyaml>=6.0.2",
   "shippo>=3.9.0",
   "sse-starlette>=3.0.2",
-  "stripe>=12.5.0",
   "tenacity>=9.1.0",
 ]
 

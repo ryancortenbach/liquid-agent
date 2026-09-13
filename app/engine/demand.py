@@ -88,4 +88,4 @@ def accept_expected_value_cents(state: ItemState, offer: StandingOffer, hours: f
     else:
         continuation = state.instant_quote_cents if state.instant_ok else 0
     accepted_net = net_proceeds_cents(offer.channel, offer.amount_cents)
-    return offer.pay_reliability * accepted_net + (1 - offer.pay_reliability) * continuation
+    return offer.close_reliability * accepted_net + (1 - offer.close_reliability) * continuation

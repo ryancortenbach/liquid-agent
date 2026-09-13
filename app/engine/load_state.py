@@ -3,17 +3,23 @@ from __future__ import annotations
 from sqlmodel import Session, select
 
 from app.clock import as_utc
-from app.engine.state import ChannelState, CheckoutState, ItemState, StandingOffer, default_channels
+from app.engine.state import (
+    ChannelState,
+    ItemState,
+    SaleClaimState,
+    StandingOffer,
+    default_channels,
+)
 from app.models import (
     Buyer,
-    Checkout,
-    CheckoutStatus,
     DemandObs,
     Item,
     Listing,
     ListingStatus,
     Offer,
     OfferStatus,
+    SaleClaim,
+    SaleClaimStatus,
 )
 
 
@@ -42,26 +48,26 @@ def load_state(session: Session, item_id: str) -> ItemState:
                 buyer_id=offer.buyer_id,
                 amount_cents=offer.amount_cents,
                 channel=buyer.channel,
-                pay_reliability=buyer.pay_reliability,
-                settlement_hours=0.1 if buyer.channel == "local" else 96,
+                close_reliability=buyer.close_reliability,
+                settlement_hours=2 if buyer.channel == "facebook" else 96,
                 answered=offer.status == OfferStatus.COUNTERED,
-                buyer_failed=buyer.failed_count > 0,
+                buyer_failed_close=buyer.failed_close_count > 0,
             )
         )
 
-    checkout_row = session.exec(
-        select(Checkout).where(
-            Checkout.item_id == item_id,
-            Checkout.status == CheckoutStatus.OPEN,
+    claim_row = session.exec(
+        select(SaleClaim).where(
+            SaleClaim.item_id == item_id,
+            SaleClaim.status == SaleClaimStatus.ACTIVE,
         )
     ).first()
-    checkout = None
-    if checkout_row is not None:
-        checkout = CheckoutState(
-            id=checkout_row.id,
-            buyer_id=checkout_row.buyer_id,
-            amount_cents=checkout_row.amount_cents,
-            window_ends_at=as_utc(checkout_row.window_ends_at),
+    active_sale_claim = None
+    if claim_row is not None:
+        active_sale_claim = SaleClaimState(
+            id=claim_row.id,
+            offer_id=claim_row.offer_id,
+            channel=claim_row.channel,
+            amount_cents=claim_row.amount_cents,
         )
 
     observations = session.exec(select(DemandObs).where(DemandObs.item_id == item_id)).all()
@@ -108,6 +114,6 @@ def load_state(session: Session, item_id: str) -> ItemState:
         escalated_at=as_utc(item.escalated_at) if item.escalated_at else None,
         channels=tuple(channels),
         offers=tuple(offers),
-        checkout=checkout,
+        active_sale_claim=active_sale_claim,
         interested_buyer_ids=tuple(dict.fromkeys(offer.buyer_id for offer in offer_rows)),
     )

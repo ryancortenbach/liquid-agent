@@ -63,7 +63,7 @@ def write_markdown(
             "The oracle sees every future executable buyer and represents an upper bound. "
             "Agent exit rate includes the modeled instant exit at the deadline. Agent market sale "
             "rate excludes it. Baselines report zero for unsold inventory. This first harness "
-            "models prices, Poisson arrivals, willingness to pay, offers, payment reliability, "
+            "models prices, Poisson arrivals, willingness to pay, offers, close reliability, "
             "ghosting, and fees. Response latency and delayed settlement are not modeled yet.",
             "",
         ]

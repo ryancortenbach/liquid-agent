@@ -10,7 +10,6 @@ from app.engine.actions import (
     Escalate,
     Expire,
     Hold,
-    PaymentTimeout,
     Reprice,
     RouteInstant,
 )
@@ -41,7 +40,7 @@ def counter_price_cents(
     target = ceiling
     for price in range(state.floor_cents, ceiling + 1, 100):
         if (
-            offer.pay_reliability * net_proceeds_cents(offer.channel, price)
+            offer.close_reliability * net_proceeds_cents(offer.channel, price)
             >= continuation_value_cents
         ):
             target = price
@@ -92,10 +91,10 @@ def _inputs(state: ItemState, tau: float) -> dict:
                 "offer_id": offer.id,
                 "amount_cents": offer.amount_cents,
                 "buyer_id": offer.buyer_id,
-                "pay_reliability": offer.pay_reliability,
+                "close_reliability": offer.close_reliability,
             }
             for offer in state.offers
-            if not offer.buyer_failed
+            if not offer.buyer_failed_close
         ],
     }
 
@@ -104,16 +103,8 @@ def decide(state: ItemState, now: datetime) -> Action:
     tau = hours_until(state.deadline_at, now)
     inputs = _inputs(state, tau)
 
-    if state.status == ItemStatus.PENDING_PAYMENT:
-        if state.checkout is None:
-            return Hold(reason="pending payment has no checkout snapshot", inputs=inputs)
-        if now >= state.checkout.window_ends_at:
-            return PaymentTimeout(
-                reason="payment window ended",
-                inputs=inputs,
-                checkout_id=state.checkout.id,
-            )
-        return Hold(reason="buyer payment window is still open", inputs=inputs)
+    if state.status == ItemStatus.SALE_PENDING:
+        return Hold(reason="marketplace sale claim is awaiting confirmation", inputs=inputs)
 
     if state.status not in (ItemStatus.LIVE, ItemStatus.ESCALATED):
         return Hold(reason=f"item status {state.status} is not actionable", inputs=inputs)
@@ -128,7 +119,7 @@ def decide(state: ItemState, now: datetime) -> Action:
         return Expire(reason="deadline passed without an executable exit", inputs=inputs)
 
     target = optimal_price(state, tau)
-    standing = tuple(offer for offer in state.offers if not offer.buyer_failed)
+    standing = tuple(offer for offer in state.offers if not offer.buyer_failed_close)
     best = max(
         standing,
         key=lambda offer: accept_expected_value_cents(state, offer, tau),
@@ -146,6 +137,7 @@ def decide(state: ItemState, now: datetime) -> Action:
                 inputs=inputs,
                 offer_id=best.id,
                 buyer_id=best.buyer_id,
+                channel=best.channel,
                 amount_cents=best.amount_cents,
             )
 

@@ -22,7 +22,7 @@ class ItemStatus(StrEnum):
     IDENTIFIED = "identified"
     PRICED = "priced"
     LIVE = "live"
-    PENDING_PAYMENT = "pending_payment"
+    SALE_PENDING = "sale_pending"
     ESCALATED = "escalated"
     SOLD = "sold"
     LABELED = "labeled"
@@ -35,6 +35,7 @@ class ItemStatus(StrEnum):
 class ListingStatus(StrEnum):
     DRAFT = "draft"
     LIVE = "live"
+    PAUSED = "paused"
     ENDED = "ended"
 
 
@@ -47,11 +48,24 @@ class OfferStatus(StrEnum):
     SUPERSEDED = "superseded"
 
 
-class CheckoutStatus(StrEnum):
-    OPEN = "open"
-    PAID = "paid"
+class SaleClaimStatus(StrEnum):
+    ACTIVE = "active"
+    CONFIRMED = "confirmed"
+    RELEASED = "released"
+
+
+class PhotoRole(StrEnum):
+    ORIGINAL = "original"
+    ENHANCED = "enhanced"
+
+
+class PhotoStatus(StrEnum):
+    ORIGINAL = "original"
+    PROCESSING = "processing"
+    REVIEW = "review"
+    APPROVED = "approved"
+    REJECTED = "rejected"
     FAILED = "failed"
-    EXPIRED = "expired"
 
 
 class Seller(SQLModel, table=True):
@@ -102,13 +116,31 @@ class Listing(SQLModel, table=True):
     last_reprice_at: datetime | None = None
 
 
+class ProductPhoto(SQLModel, table=True):
+    id: str = Field(default_factory=new_id, primary_key=True)
+    item_id: str = Field(foreign_key="item.id", index=True)
+    source_photo_id: str | None = Field(default=None, foreign_key="productphoto.id", index=True)
+    role: PhotoRole
+    status: PhotoStatus
+    file_path: str
+    mime_type: str
+    sha256: str
+    preset: str | None = None
+    prompt: str | None = None
+    model: str | None = None
+    disclosure: str | None = None
+    failure_reason: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    reviewed_at: datetime | None = None
+
+
 class Buyer(SQLModel, table=True):
     id: str = Field(default_factory=new_id, primary_key=True)
     handle: str = Field(index=True)
-    channel: str = "local"
+    channel: str = "facebook"
     name: str | None = None
-    pay_reliability: float = Field(default=0.85, ge=0, le=1)
-    failed_count: int = Field(default=0, ge=0)
+    close_reliability: float = Field(default=0.85, ge=0, le=1)
+    failed_close_count: int = Field(default=0, ge=0)
 
 
 class Offer(SQLModel, table=True):
@@ -122,25 +154,26 @@ class Offer(SQLModel, table=True):
     expires_at: datetime | None = None
 
 
-class Checkout(SQLModel, table=True):
+class SaleClaim(SQLModel, table=True):
     __table_args__ = (
         Index(
-            "uq_checkout_item_open",
+            "uq_sale_claim_item_active",
             "item_id",
             unique=True,
-            sqlite_where=text("status = 'OPEN'"),
+            sqlite_where=text("status = 'ACTIVE'"),
         ),
     )
 
     id: str = Field(default_factory=new_id, primary_key=True)
     item_id: str = Field(foreign_key="item.id", index=True)
-    buyer_id: str = Field(foreign_key="buyer.id", index=True)
-    stripe_session_id: str | None = Field(default=None, unique=True)
+    offer_id: str = Field(foreign_key="offer.id", index=True)
+    channel: str
+    external_reference: str | None = None
     amount_cents: int = Field(gt=0)
-    status: CheckoutStatus = CheckoutStatus.OPEN
-    opened_at: datetime = Field(default_factory=utc_now)
-    window_ends_at: datetime
-    paid_event_id: str | None = None
+    status: SaleClaimStatus = SaleClaimStatus.ACTIVE
+    claimed_at: datetime = Field(default_factory=utc_now)
+    resolved_at: datetime | None = None
+    resolution_source: str | None = None
 
 
 class Shipment(SQLModel, table=True):

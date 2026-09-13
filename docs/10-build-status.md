@@ -4,40 +4,34 @@ Updated 2026-09-13.
 
 ## Green now
 
-- Python project, locked dependencies, environment template
-- Real, accelerated demo, and stepped simulation clocks
-- SQLite data model with WAL, foreign keys, and a unique open-checkout constraint
-- Per-item lock registry
-- Pure demand model, expected-value price search, and liquidity frontier
-- HOLD, REPRICE, COUNTER, ACCEPT, ESCALATE, EXPIRE, instant route, and payment timeout policy
-- Guard checks for floor, deadline, terminal state, checkout, and monotonic price invariants
-- Transactional executor, ledger writes, and idempotent outbox rows
-- FastAPI health, plan, item creation, tick, and ledger endpoints
-- Seeded market simulation across five policies, four deadlines, and three item archetypes
-- Generated evaluation table and chart from 12,000 policy runs
-- Unit, API, property, clock, demand, policy, and guard tests
+- Seller-only product model with no checkout or payment processing
+- OpenAI product-photo edit adapter using the high-precision image model
+- Studio, natural-home, and clean-tabletop photo presets
+- Immutable original photo storage with MIME and file-signature validation
+- Local HEIC decoding and EXIF orientation normalization for iPhone photos
+- Generated photo records containing the source link, hash, model, prompt, preset, and disclosure
+- Mandatory seller review before an enhanced image can join the listing image set
+- SQLite sale claims that pause duplicates and support confirmed or failed marketplace closes
+- Deadline pricing engine, guard, ledger, outbox, simulation, and evaluation artifacts
+- FastAPI item, photo enhancement, photo review, file, planning, tick, and ledger endpoints
+- 34 passing unit, API, property, clock, simulation, sale-claim, and photo tests
 
 ## Ordered P0 queue
 
-1. BlueBubbles webhook intake. Add the three-second photo and caption buffer.
-2. Claude schemas for vision and seller or buyer intent, with deterministic fallbacks.
-3. eBay Browse token cache, comps search, filtering, and market statistics.
-4. Offer page and buyer offer ingestion.
-5. Stripe checkout lifecycle and signature-verified webhook transitions.
-6. Outbox delivery worker with retries and restart tests.
-7. Shippo label and Google Calendar adapters behind the paid transition.
-8. Dashboard with ledger stream, frontier, pipeline, countdown, and demo clock controls.
-9. Scripted demo scenario, reset command, live smoke checks, and final eval artifacts.
-10. Extend simulation with response latency and delayed settlement.
-
-P1 eBay sandbox listing work remains behind the 13:30 feature gate from the original plan.
+1. Add product identity and defect extraction before image editing.
+2. Add automated comparison checks between original and generated images.
+3. Connect BlueBubbles photo attachments to the enhancement endpoint.
+4. Build the seller's side-by-side approval card.
+5. Publish approved listing packs to the eBay sandbox.
+6. Build the assisted Facebook Marketplace publication flow.
+7. Add the outbox delivery worker and restart tests.
+8. Build the demo dashboard and recorded scenario.
 
 ## Local setup blockers
 
-- BlueBubbles is not installed.
-- `.env` has not been created, so external service credentials are not configured.
-- Stripe CLI and ngrok are not installed. Cloudflared is available for the public tunnel.
-- Google Calendar OAuth client JSON is not present.
+- `OPENAI_API_KEY` is required for a live photo edit.
+- BlueBubbles needs manual installation and macOS permissions.
+- eBay sandbox keys and seller authorization are required for a live sandbox listing.
+- Google Calendar OAuth is optional and not yet configured.
 
-These do not block core, simulation, adapter, dashboard, or test development. They block live
-end-to-end smoke tests for their respective services.
+These do not block local tests or development with a fake photo editor.

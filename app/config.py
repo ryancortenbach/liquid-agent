@@ -21,16 +21,19 @@ class Settings(BaseSettings):
     public_base_url: str = "http://localhost:8000"
     tz: str = "America/Los_Angeles"
     database_url: str = "sqlite:///data/liquid.db"
+    photo_storage_dir: str = "data/photos"
 
     anthropic_api_key: str | None = None
     claude_model: str = "claude-opus-5"
+    openai_api_key: str | None = None
+    openai_image_model: str = "gpt-image-2.5-sunburst"
+    openai_image_quality: str = "high"
+    openai_image_size: str = "1024x1024"
     bb_server_url: str = "http://localhost:1234"
     bb_password: str | None = None
     seller_handle: str | None = None
     ebay_client_id: str | None = None
     ebay_client_secret: str | None = None
-    stripe_secret_key: str | None = None
-    stripe_webhook_secret: str | None = None
     shippo_api_key: str | None = None
     google_oauth_client_json: str = "./secrets/gcal_client.json"
     google_token_json: str = "./secrets/gcal_token.json"

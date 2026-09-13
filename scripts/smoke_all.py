@@ -40,8 +40,8 @@ async def run(live: bool) -> int:
         results.append(("BlueBubbles", "MISSING", "BB_PASSWORD"))
 
     checks = [
+        ("OpenAI image editing", settings.openai_api_key, "OPENAI_API_KEY"),
         ("eBay Browse", settings.ebay_client_id and settings.ebay_client_secret, "eBay keys"),
-        ("Stripe", settings.stripe_secret_key, "STRIPE_SECRET_KEY"),
         ("Shippo", settings.shippo_api_key, "SHIPPO_API_KEY"),
         ("Claude", settings.anthropic_api_key, "ANTHROPIC_API_KEY"),
     ]

@@ -1,35 +1,55 @@
 # Liquid
 
-**Take a picture. Set a deadline. We'll get it sold.**
+**Take a picture. Set a deadline. Get it listed everywhere it can sell.**
 
-Entry for the [Multi-App AI Agent Hackathon](https://multiappagenthackathon.com) · Sunday, September 13, 2026.
+Entry for the [Multi-App AI Agent Hackathon](https://multiappagenthackathon.com), Sunday,
+September 13, 2026.
 
-Liquid is a deadline-native selling agent that lives in your iMessages. You text it a photo and a deadline. It identifies the item, works out how much cash it can reliably become and how fast, lists it, reprices, negotiates with buyers, routes to the best executable exit before your deadline, takes payment, buys the shipping label, and puts the drop-off on your calendar. It texts you only when it needs a decision.
+Liquid is a seller-only agent for regular people who want to sell an item quickly without
+looking careless or suspicious. The seller texts photos and a deadline. Liquid identifies the
+item, checks and improves the listing photos without changing the item itself, writes a credible
+listing, estimates the market, and publishes to supported marketplaces. It monitors demand,
+reprices as the deadline approaches, compares offers, and prevents the same item from being sold
+twice.
 
-> Normal marketplaces optimize listings. Liquid optimizes liquidation.
+Buyers never join Liquid. They discover and purchase the item through eBay, Facebook Marketplace,
+Craigslist, OfferUp, or another existing marketplace. Liquid does not run a buyer marketplace and
+does not process buyer payments.
+
+> Marketplaces provide buyers. Liquid gives ordinary sellers a professional selling operation.
+
+## Channel model
+
+| Channel | Publishing mode |
+|---|---|
+| eBay | Automated through the official Inventory API. Sandbox for the hackathon demo. |
+| Facebook Marketplace | Assisted. Liquid prepares and fills the listing, then the seller approves publication. |
+| Craigslist and OfferUp | Assisted until an approved API or partner integration is available. |
+| Other channels | Added through adapters with explicit capability and policy checks. |
 
 ## External apps
-iMessage (via BlueBubbles on a Mac) · eBay · Stripe · Shippo · Google Calendar · Claude (vision, intent, language)
+
+iMessage via BlueBubbles, OpenAI for product-photo editing, eBay, assisted marketplace browser
+flows, Google Calendar, Shippo when a marketplace does not provide the label, and Claude for item
+analysis, listing copy, and seller messages.
 
 ## Docs
+
 | File | What it defines |
 |---|---|
-| [docs/00-brief.md](docs/00-brief.md) | The hackathon brief, rubric, submission list, and how we score each line |
-| [docs/01-product.md](docs/01-product.md) | Product spec: thesis, the core loop, every feature by priority, conversation design, promises |
-| [docs/02-architecture.md](docs/02-architecture.md) | System design, repo skeleton, data model, state machine, clock, config, dependencies |
-| [docs/03-engine.md](docs/03-engine.md) | The liquidation engine: demand model, objective, frontier, offer logic, reprice rules, pseudocode |
-| [docs/04-integrations.md](docs/04-integrations.md) | Each external app: endpoints, auth, payloads, gotchas, fallbacks |
-| [docs/05-reliability.md](docs/05-reliability.md) | Invariants, guard layer, idempotency, eval harness, tests, chaos, what is real vs modeled |
-| [docs/06-demo.md](docs/06-demo.md) | The two-minute demo script, time compression, screen layout, fallback plan |
-| [docs/07-schedule.md](docs/07-schedule.md) | Hour-by-hour build plan with parallel tracks and cut lines |
-| [docs/08-setup.md](docs/08-setup.md) | Tonight's checklist: accounts, keys, Mac permissions, smoke tests |
-| [docs/09-brief-template.md](docs/09-brief-template.md) | Skeleton of the "system and reliability brief" we submit |
-
-Status: planning complete 2026-09-12. Code starts 2026-09-13.
+| [docs/00-brief.md](docs/00-brief.md) | Hackathon brief, rubric, and scoring strategy |
+| [docs/01-product.md](docs/01-product.md) | Seller-only product and feature priorities |
+| [docs/02-architecture.md](docs/02-architecture.md) | Architecture, data model, and state transitions |
+| [docs/03-engine.md](docs/03-engine.md) | Deadline pricing and cross-channel offer policy |
+| [docs/04-integrations.md](docs/04-integrations.md) | Marketplace and seller-interface integrations |
+| [docs/05-reliability.md](docs/05-reliability.md) | Invariants, tests, evaluation, and disclosure |
+| [docs/06-demo.md](docs/06-demo.md) | Two-minute seller workflow demo |
+| [docs/07-schedule.md](docs/07-schedule.md) | Build order and cut lines |
+| [docs/08-setup.md](docs/08-setup.md) | Accounts, keys, and local setup |
+| [docs/09-brief-template.md](docs/09-brief-template.md) | Submission brief template |
+| [docs/10-build-status.md](docs/10-build-status.md) | Current implementation and next work |
 
 ## Local development
-
-The deterministic core runs without external credentials:
 
 ```bash
 uv sync
@@ -38,8 +58,10 @@ uv run uvicorn app.main:app --reload
 ```
 
 Open `http://localhost:8000/docs` for the API. `POST /api/plan` previews a liquidity
-frontier. `POST /api/items` creates a live item, and `POST /api/items/{item_id}/tick`
-runs the same guarded decision path used by demo and simulation clocks.
+frontier. `POST /api/items` creates an item, and `POST /api/items/{item_id}/tick` runs the
+guarded decision path shared by real, demo, and simulation clocks.
 
-Current implementation status and the ordered build queue are in
-[`docs/10-build-status.md`](docs/10-build-status.md).
+For the photo flow, set `OPENAI_API_KEY`, upload an image to
+`POST /api/items/{item_id}/photos/enhance`, compare the returned original and enhanced URLs, then
+approve or reject it through `POST /api/items/{item_id}/photos/{photo_id}/review`. Enhanced photos
+never enter the listing image set before approval.

@@ -17,15 +17,15 @@ def test_willingness_to_pay_falls_as_price_rises() -> None:
 
 
 def test_no_inquiries_lower_the_arrival_posterior() -> None:
-    prior = ChannelState("local", prior_alpha=2, prior_beta_hours=24)
-    quiet_day = ChannelState("local", prior_alpha=2, prior_beta_hours=24, elapsed_hours=24)
+    prior = ChannelState("facebook", prior_alpha=2, prior_beta_hours=24)
+    quiet_day = ChannelState("facebook", prior_alpha=2, prior_beta_hours=24, elapsed_hours=24)
     assert arrival_rate_per_hour(quiet_day) < arrival_rate_per_hour(prior)
 
 
 def test_views_contribute_fractional_demand() -> None:
-    quiet = ChannelState("local", prior_alpha=2, prior_beta_hours=24, elapsed_hours=24)
+    quiet = ChannelState("facebook", prior_alpha=2, prior_beta_hours=24, elapsed_hours=24)
     viewed = ChannelState(
-        "local",
+        "facebook",
         prior_alpha=2,
         prior_beta_hours=24,
         elapsed_hours=24,

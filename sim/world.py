@@ -11,7 +11,7 @@ class Archetype:
     sigma_cents: int
     floor_cents: int
     instant_cents: int
-    local_arrivals_per_day: float
+    facebook_arrivals_per_day: float
     ebay_arrivals_per_day: float
 
 
@@ -36,7 +36,7 @@ def generate_market(archetype: Archetype, deadline_hours: int, seed: int) -> lis
     rng = random.Random(seed)
     events: list[BuyerEvent] = []
     for channel, daily_rate, ghost_rate, pay_rate in (
-        ("local", archetype.local_arrivals_per_day, 0.25, 0.85),
+        ("facebook", archetype.facebook_arrivals_per_day, 0.25, 0.85),
         ("ebay", archetype.ebay_arrivals_per_day, 0.05, 0.97),
     ):
         hourly_rate = daily_rate / 24

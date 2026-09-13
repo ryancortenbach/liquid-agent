@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timedelta
 
-from app.engine.actions import Accept, Counter, Escalate, Expire, PaymentTimeout, Reprice
+from app.engine.actions import Accept, Counter, Escalate, Expire, Hold, Reprice
 from app.engine.policy import decide
-from app.engine.state import CheckoutState, ItemState, StandingOffer
+from app.engine.state import ItemState, SaleClaimState, StandingOffer
 from app.models import ItemStatus
 
 
@@ -63,12 +63,16 @@ def test_expires_at_deadline_without_instant_preauthorization(
     assert isinstance(decide(state, now), Expire)
 
 
-def test_times_out_checkout(item_state: ItemState, now: datetime) -> None:
-    checkout = CheckoutState(
-        id="checkout-1",
-        buyer_id="buyer-1",
+def test_holds_while_marketplace_sale_is_pending(item_state: ItemState, now: datetime) -> None:
+    claim = SaleClaimState(
+        id="claim-1",
+        offer_id="offer-1",
+        channel="ebay",
         amount_cents=18_700,
-        window_ends_at=now,
     )
-    state = replace(item_state, status=ItemStatus.PENDING_PAYMENT, checkout=checkout)
-    assert isinstance(decide(state, now), PaymentTimeout)
+    state = replace(
+        item_state,
+        status=ItemStatus.SALE_PENDING,
+        active_sale_claim=claim,
+    )
+    assert isinstance(decide(state, now), Hold)

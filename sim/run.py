@@ -38,12 +38,12 @@ def channels_for(
 ) -> tuple[ChannelState, ...]:
     return (
         ChannelState(
-            "local",
-            prior_alpha=archetype.local_arrivals_per_day,
+            "facebook",
+            prior_alpha=archetype.facebook_arrivals_per_day,
             prior_beta_hours=24,
             elapsed_hours=elapsed_hours,
-            inquiries=inquiries["local"],
-            views=round(elapsed_hours * archetype.local_arrivals_per_day / 24 * 20),
+            inquiries=inquiries["facebook"],
+            views=round(elapsed_hours * archetype.facebook_arrivals_per_day / 24 * 20),
         ),
         ChannelState(
             "ebay",
@@ -127,7 +127,7 @@ def run_one(
     if policy == PolicyName.ORACLE:
         return oracle_result(archetype, deadline_hours, seed, events)
 
-    inquiries = {"local": 0, "ebay": 0}
+    inquiries = {"facebook": 0, "ebay": 0}
     current_price = archetype.market_cents
     if policy == PolicyName.AGENT:
         state, _ = agent_state(archetype, deadline_hours, 0, current_price, inquiries)
@@ -172,8 +172,8 @@ def run_one(
                 buyer_id=f"buyer-{index}",
                 amount_cents=event.offer_cents,
                 channel=event.channel,
-                pay_reliability=0.85 if event.channel == "local" else 0.97,
-                settlement_hours=0.1 if event.channel == "local" else 96,
+                close_reliability=0.85 if event.channel == "facebook" else 0.97,
+                settlement_hours=2 if event.channel == "facebook" else 96,
             )
             offer_state, now = agent_state(
                 archetype,
