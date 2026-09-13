@@ -25,7 +25,7 @@ Updated 2026-09-13.
 - SQLite sale claims that pause duplicates and support confirmed or failed marketplace closes
 - Deadline pricing engine, guard, ledger, outbox, simulation, and evaluation artifacts
 - FastAPI item, photo enhancement, photo review, file, planning, tick, and ledger endpoints
-- 93 passing unit, API, property, clock, simulation, sale-claim, photo, iMessage, and eBay tests
+- 106 passing unit, API, property, clock, simulation, sale-claim, photo, iMessage, and eBay tests
 
 ## Ordered P0 queue
 

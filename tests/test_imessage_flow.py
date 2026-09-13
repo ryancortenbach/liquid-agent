@@ -338,6 +338,33 @@ def test_unconnected_seller_can_retry_or_check_but_not_skip(tmp_path: Path) -> N
         assert adapter.sent_texts[-1].startswith("An eBay seller account is required")
 
 
+def test_shared_ebay_publisher_does_not_bypass_seller_onboarding(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    app = create_app(
+        Settings(
+            mode=Mode.SIM,
+            database_url="sqlite:///:memory:",
+            photo_storage_dir=str(tmp_path),
+            bb_webhook_secret="webhook-secret",
+            seller_handle="+14155550123",
+            openai_api_key=None,
+        ),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+        ebay_connection_service=FakeEbayConnectionService(),
+        ebay_publisher=object(),  # type: ignore[arg-type]
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/webhooks/bluebubbles?secret=webhook-secret",
+            json=message_payload(guid="shared-ebay-1", text="hello"),
+        )
+
+        assert response.json()["status"] == "queued"
+        assert adapter.sent_texts[-1].startswith("Welcome to Liquid")
+
+
 def test_ebay_callback_recovers_from_decline_and_completes_on_retry(tmp_path: Path) -> None:
     adapter = FakeMessageAdapter()
     service = FakeEbayConnectionService()

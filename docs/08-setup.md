@@ -73,7 +73,8 @@ uv run python scripts/ebay_authorize.py
 
 Sign in as the sandbox test user, approve, and paste the URL you land on. No public callback is
 needed: the script exchanges the `code` from that URL and writes `EBAY_SB_REFRESH_TOKEN` to
-`.env`. The app's publisher uses that token for every seller.
+`.env`. This shared token supports developer verification and API-only tests. It does not bypass
+the required per-seller iMessage onboarding flow.
 
 ```bash
 uv run python scripts/ebay_setup.py
@@ -99,10 +100,9 @@ fetches them from `/api/photos/{id}/file` instead.
 Category: an explicit `category_id`, else a live Taxonomy suggestion for the title (production
 keyset), else `EBAY_SB_DEFAULT_CATEGORY_ID`, else a leaf category for the identifier's item kind.
 
-Per-seller connections (`CONNECT EBAY` in iMessage, `/oauth/ebay/callback`) still work when
-`APP_SECRET` and the RuName are set and `PUBLIC_BASE_URL` is public; a seller's own connection
-takes precedence over the `.env` token. `REQUIRE_EBAY_ONBOARDING` gates intake only when a
-per-seller connection is the sole way to publish.
+Per-seller connections (`CONNECT EBAY` in iMessage, `/oauth/ebay/callback`) require `APP_SECRET`,
+the RuName, and a public `PUBLIC_BASE_URL`. Each seller's own connection is required before intake
+and takes precedence over the `.env` token. Keep `REQUIRE_EBAY_ONBOARDING=true`.
 
 API path: `POST /api/items/{item_id}/publish/ebay` with
 `{"seller_approved": false, "aspects": {"Brand": ["Sony"]}}` prepares a draft; repeat with

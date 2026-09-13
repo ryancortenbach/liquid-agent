@@ -302,20 +302,7 @@ def create_app(
                     if app.state.ebay_connections is not None
                     else None
                 ),
-                # Per-seller onboarding only gates intake when it is the sole way to publish:
-                # a sandbox refresh token in .env (or an injected publisher) serves every seller.
-                require_ebay_onboarding=(
-                    app_settings.require_ebay_onboarding
-                    and app.state.ebay_connections is not None
-                    and ebay_publisher is None
-                    and not all(
-                        (
-                            app_settings.ebay_sb_client_id,
-                            app_settings.ebay_sb_client_secret,
-                            app_settings.ebay_sb_refresh_token,
-                        )
-                    )
-                ),
+                require_ebay_onboarding=app_settings.require_ebay_onboarding,
                 identifier=app.state.identifier,
                 reviewer=app.state.photo_reviewer,
             )
