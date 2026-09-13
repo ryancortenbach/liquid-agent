@@ -25,10 +25,12 @@ The generated image remains in `review` until the seller approves it. The origin
 
 1. Install BlueBubbles Server from `bluebubbles.app` on the Mac signed into the agent Apple ID.
 2. Grant Full Disk Access and set a server password.
-3. Add `BB_SERVER_URL`, `BB_PASSWORD`, `BB_WEBHOOK_SECRET`, and `SELLER_HANDLE` to `.env`.
-4. Set `PUBLIC_BASE_URL` to the HTTPS URL that forwards to the local FastAPI server.
+3. Run `uv run python scripts/configure_bluebubbles_local.py` on the BlueBubbles Mac to copy the
+   local server password and generate a separate webhook secret without displaying either value.
+4. Add `SELLER_HANDLE` to `.env`. Use the phone number or email of the person texting the server,
+   not the iMessage account hosting BlueBubbles.
 5. Start Liquid with `uv run uvicorn app.main:app --reload`.
-6. Register the authenticated inbound webhook with
+6. Register the authenticated local inbound webhook with
    `uv run python scripts/register_bluebubbles_webhook.py`.
 7. Text a photo and caption from `SELLER_HANDLE`. Liquid accepts messages only from that handle.
 8. Confirm the original and enhanced photos arrive, then reply `APPROVE` or `REJECT`.

@@ -25,7 +25,7 @@ async def run() -> int:
     adapter = BlueBubblesAdapter(settings.bb_server_url, settings.bb_password or "")
     try:
         await adapter.ping()
-        base_url = settings.public_base_url.rstrip("/")
+        base_url = settings.bb_webhook_base_url.rstrip("/")
         encoded_secret = quote(settings.bb_webhook_secret or "", safe="")
         webhook_url = f"{base_url}/webhooks/bluebubbles?secret={encoded_secret}"
         result = await adapter.register_webhook(webhook_url)

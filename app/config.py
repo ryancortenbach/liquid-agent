@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     bb_server_url: str = "http://localhost:1234"
     bb_password: str | None = None
     bb_webhook_secret: str | None = None
+    bb_webhook_base_url: str = "http://localhost:8000"
     seller_handle: str | None = None
     ebay_client_id: str | None = None
     ebay_client_secret: str | None = None
