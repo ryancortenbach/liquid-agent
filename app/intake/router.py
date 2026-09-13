@@ -6,6 +6,7 @@ from app.channels.base import InboundMessage
 from app.channels.chat_ai import ChatIntent, ChatInterpreter
 from app.channels.seller_router import SellerMessageRouter
 from app.intake.flow import ListingFlow
+from app.intake.item_guard import extract_separate_item_requests, separate_items_reply
 
 DIRECT_TEXT = {
     "approve",
@@ -103,6 +104,21 @@ class PipelineRouter:
             return
         self.base.remember_turn(message, role="user", text=message.text)
         if not message.attachments and await self.base.handle_control(message):
+            return
+        separate_items = extract_separate_item_requests(message.text)
+        if not message.attachments and separate_items:
+            reply = separate_items_reply(separate_items)
+            await self.base.adapter.send_text(
+                message.chat_guid,
+                reply,
+                f"{message.guid}:separate-items",
+            )
+            self.base.remember_turn(
+                message,
+                role="assistant",
+                text=reply,
+                intent="separate_items",
+            )
             return
         if (
             self.chat_interpreter is not None

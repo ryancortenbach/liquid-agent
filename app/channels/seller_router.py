@@ -24,6 +24,7 @@ from app.inbound.identify import (
     crop_inventory_item,
     interpret_confirmation,
 )
+from app.intake.item_guard import extract_separate_item_requests
 from app.ledger import write_decision
 from app.models import (
     ConditionGrade,
@@ -365,8 +366,7 @@ class SellerMessageRouter:
                 response = f"No problem. Here's a fresh 10-minute link: {link}"
             elif message.attachments:
                 response = (
-                    "I've got the photo. Connect your eBay first, then send it again: "
-                    f"{link}"
+                    f"I've got the photo. Connect your eBay first, then send it again: {link}"
                 )
             else:
                 response = (
@@ -606,16 +606,41 @@ class SellerMessageRouter:
             )
             return
 
-        detector = getattr(self.identifier, "detect_all", None)
+        explicit_batch = bool(BATCH_PATTERN.match(message.text.strip()))
+        separate_items = extract_separate_item_requests(message.text)
+        auto_item_batch = (
+            not explicit_batch
+            and len(separate_items) >= 2
+            and len(attachments) == len(separate_items)
+        )
         if (
-            len(attachments) == 1
-            and not BATCH_PATTERN.match(message.text.strip())
-            and callable(detector)
+            not explicit_batch
+            and len(separate_items) >= 2
+            and len(attachments) > 1
+            and not auto_item_batch
         ):
+            await self.adapter.send_text(
+                message.chat_guid,
+                (
+                    f"I found {len(separate_items)} item names and {len(attachments)} photos. "
+                    "I won't guess which photos belong together. Resend them one item at a time, "
+                    "or label the photo groups like BATCH 2+1."
+                ),
+                f"{message.guid}:ambiguous-batch",
+            )
+            return
+
+        detector = getattr(self.identifier, "detect_all", None)
+        if len(attachments) == 1 and not explicit_batch and callable(detector):
             await self._process_inventory_photo(message, attachments[0], detector)
             return
 
-        groups = batch_photo_groups(message.text, len(attachments))
+        groups = (
+            [[index] for index in range(len(attachments))]
+            if auto_item_batch
+            else batch_photo_groups(message.text, len(attachments))
+        )
+        item_captions = separate_items if auto_item_batch else [message.text for _ in groups]
         is_batch = len(groups) > 1
         with Session(self.engine) as session:
             conversation = self._get_or_create_conversation(session, message)
@@ -623,7 +648,7 @@ class SellerMessageRouter:
                 self._get_or_create_item(
                     session,
                     conversation,
-                    message.text,
+                    item_captions[index],
                     force_new=is_batch or index > 0,
                 )
                 for index in range(len(groups))
@@ -663,8 +688,8 @@ class SellerMessageRouter:
             identity_inputs = [media[indexes[0]] for indexes in groups]
             identities = await asyncio.gather(
                 *(
-                    self.identifier.identify(content, mime_type, message.text)
-                    for _, content, mime_type in identity_inputs
+                    self.identifier.identify(content, mime_type, item_captions[index])
+                    for index, (_, content, mime_type) in enumerate(identity_inputs)
                 )
             )
             with Session(self.engine) as session:

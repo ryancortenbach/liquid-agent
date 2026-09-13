@@ -61,8 +61,10 @@ class FakeIdentifier:
 class SequenceIdentifier:
     def __init__(self, identities: list[ItemIdentity]) -> None:
         self.identities = iter(identities)
+        self.captions: list[str] = []
 
     async def identify(self, content: bytes, mime_type: str, caption: str) -> ItemIdentity:
+        self.captions.append(caption)
         return next(self.identities)
 
 
@@ -70,9 +72,7 @@ class FakeInventoryIdentifier:
     async def identify(self, content: bytes, mime_type: str, caption: str) -> ItemIdentity:
         raise AssertionError("single-item identification should not run")
 
-    async def detect_all(
-        self, content: bytes, mime_type: str, caption: str
-    ) -> InventoryDetection:
+    async def detect_all(self, content: bytes, mime_type: str, caption: str) -> InventoryDetection:
         return InventoryDetection(
             items=[
                 InventoryItem(
@@ -120,7 +120,8 @@ def test_question_and_confirmation_parsing() -> None:
     assert "2) Apple iPad Air 4th gen 64GB Wi-Fi" in question
     assert interpret_confirmation("yes", IDENTITY) == ("yes", IDENTITY.title)
     assert interpret_confirmation("2", IDENTITY) == (
-        "candidate", "Apple iPad Air 4th gen 64GB Wi-Fi",
+        "candidate",
+        "Apple iPad Air 4th gen 64GB Wi-Fi",
     )
     assert interpret_confirmation("no it's the 4th gen", IDENTITY) == ("named", "the 4th gen")
     assert interpret_confirmation("   ", IDENTITY) == ("named", None)
@@ -203,9 +204,7 @@ def test_openai_identifier_detects_all_sellable_objects() -> None:
         "unused-test-key",
         client=SimpleNamespace(responses=FakeResponses()),
     )
-    result = asyncio.run(
-        identifier.detect_all(jpeg_bytes(), "image/jpeg", "sell everything here")
-    )
+    result = asyncio.run(identifier.detect_all(jpeg_bytes(), "image/jpeg", "sell everything here"))
 
     assert result.items[0].title == IDENTITY.title
     assert result.items[0].box_2d == [10, 20, 500, 600]
@@ -326,6 +325,66 @@ def test_batch_creates_separate_items_and_accepts_numbered_correction(tmp_path: 
             assert [item.title for item in items] == [IDENTITY.title, "Bose QC45 headphones"]
             assert [len(item.photo_paths) for item in items] == [4, 2]
             assert all(len(item.constraints_json["batch_item_ids"]) == 2 for item in items)
+
+
+def test_long_message_and_matching_photos_create_isolated_items(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    second = IDENTITY.model_copy(
+        update={
+            "title": "Insulated water bottle",
+            "brand": None,
+            "model": None,
+            "category": "other",
+        }
+    )
+    identifier = SequenceIdentifier([IDENTITY, second])
+    app = create_app(
+        make_settings(tmp_path),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+        identifier=identifier,
+    )
+    with TestClient(app) as client:
+        send_photos(
+            client,
+            "separate-photos-1",
+            "I want to sell my AirPods and then I want to sell my water bottle",
+            2,
+        )
+
+        assert identifier.captions == ["AirPods", "water bottle"]
+        assert adapter.sent_texts[-1].startswith("I found 2 items:")
+        with Session(app.state.engine) as session:
+            items = session.exec(select(Item).order_by(Item.created_at)).all()
+            assert len(items) == 2
+            assert [item.constraints_json["original_caption"] for item in items] == [
+                "AirPods",
+                "water bottle",
+            ]
+            assert all(len(item.constraints_json["batch_item_ids"]) == 2 for item in items)
+
+
+def test_ambiguous_photo_count_is_rejected_without_creating_items(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    identifier = SequenceIdentifier([IDENTITY])
+    app = create_app(
+        make_settings(tmp_path),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+        identifier=identifier,
+    )
+    with TestClient(app) as client:
+        send_photos(
+            client,
+            "ambiguous-photos-1",
+            "Sell my AirPods and then sell my water bottle",
+            3,
+        )
+
+        assert "I won't guess which photos belong together" in adapter.sent_texts[-1]
+        assert identifier.captions == []
+        with Session(app.state.engine) as session:
+            assert session.exec(select(Item)).all() == []
 
 
 def test_one_inventory_photo_becomes_separate_confirmed_items(tmp_path: Path) -> None:
