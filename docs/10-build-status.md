@@ -29,7 +29,7 @@ Updated 2026-09-13.
 - Live eBay listing URLs returned through iMessage and email only after publication succeeds
 - Deadline pricing engine, guard, ledger, outbox, simulation, and evaluation artifacts
 - FastAPI item, photo enhancement, photo review, file, planning, tick, and ledger endpoints
-- 112 passing unit, API, property, clock, simulation, sale-claim, photo, iMessage, email, and eBay tests
+- 172 passing unit, API, property, clock, simulation, sale-claim, photo, iMessage, email, eBay, research, pricing, intake, listing-flow, and dashboard tests
 
 ## Ordered P0 queue
 
