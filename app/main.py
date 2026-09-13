@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import logging
 import secrets
 from collections import defaultdict
@@ -658,9 +659,6 @@ def create_app(
         if message is None:
             return {"status": "ignored"}
         sender_label = f"***{canonical_handle(message.handle)[-4:]}"
-        if message.is_group and not app_settings.bb_allow_group_chats:
-            log.info("Liquid inbound ignored sender=%s reason=group_chat", sender_label)
-            return {"status": "ignored", "reason": "group_chat"}
         allowed_destination = (app_settings.bb_allowed_destination or "").strip()
         if not allowed_destination:
             # Fail closed. Without a configured destination Liquid would answer every
@@ -670,12 +668,30 @@ def create_app(
                 sender_label,
             )
             return {"status": "ignored", "reason": "destination_not_configured"}
+        if message.is_group and not app_settings.bb_allow_group_chats:
+            log.info("Liquid inbound ignored sender=%s reason=group_chat", sender_label)
+            return {"status": "ignored", "reason": "group_chat"}
+        if not message.destination_handle:
+            # BlueBubbles serializes new-message webhooks in notification mode, which omits
+            # chat.lastAddressedHandle, so ask the server which of our aliases this chat uses.
+            try:
+                resolved = await adapter.chat_destination(message.chat_guid)
+            except Exception as exc:  # server down or auth failure: refuse rather than guess
+                log.warning(
+                    "Liquid inbound refused sender=%s reason=destination_lookup_failed error=%s",
+                    sender_label,
+                    type(exc).__name__,
+                )
+                return {"status": "ignored", "reason": "destination_lookup_failed"}
+            message = replace(message, destination_handle=resolved)
         if canonical_handle(message.destination_handle or "") != canonical_handle(
             allowed_destination
         ):
+            seen = message.destination_handle or "(missing)"
             log.info(
-                "Liquid inbound ignored sender=%s reason=wrong_destination",
+                "Liquid inbound ignored sender=%s reason=wrong_destination addressed_to=%s",
                 sender_label,
+                seen if seen == "(missing)" else f"***{seen[-6:]}",
             )
             return {"status": "ignored", "reason": "wrong_destination"}
         if not router.accepts(message):

@@ -40,7 +40,11 @@ seller approves it. The original is always kept.
    sent to that address. `SELLER_HANDLE` can stay `*` (anyone who texts the Liquid address) or be a
    comma-separated list of tester numbers. Group chats are always ignored unless
    `BB_ALLOW_GROUP_CHATS=true`. Without `BB_ALLOWED_DESTINATION`, Liquid refuses to start and
-   the webhook ignores everything.
+   the webhook ignores everything. Before opening the line to testers, run
+   `uv run python scripts/imessage_accounts.py --recent 20`: it replays the last twenty real
+   messages on the Mac against the current `.env` and prints, per message, whether Liquid would
+   answer and why not. (BlueBubbles webhooks omit the addressed alias, so Liquid looks each chat
+   up over the server's REST API; the dry run uses the same data.)
 5. Start Liquid with `uv run python scripts/run_local.py`. This runner disables access logging so
    the webhook secret is not written into request logs.
 6. Register the authenticated local inbound webhook with

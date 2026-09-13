@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
+from time import monotonic
+from urllib.parse import quote
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -30,6 +32,7 @@ def inbound_fingerprint(message: InboundMessage) -> str:
 
 
 GROUP_CHAT_STYLE = 43  # Messages.app chat.style: 43 = group, 45 = one-to-one
+DESTINATION_CACHE_SECONDS = 120
 
 
 def is_group_chat(chat: dict[str, Any]) -> bool:
@@ -53,6 +56,7 @@ class BlueBubblesAdapter:
     ) -> None:
         self.server_url = server_url.rstrip("/")
         self.password = password
+        self._destination_cache: dict[str, tuple[str | None, float]] = {}
         self._client = client or httpx.AsyncClient(timeout=timeout_seconds)
         self._owns_client = client is None
 
@@ -73,6 +77,9 @@ class BlueBubblesAdapter:
             return None
         data = payload.get("data") or {}
         if data.get("isFromMe") is True:
+            return None
+        if data.get("associatedMessageGuid") or data.get("associatedMessageType"):
+            # A tapback ("Loved ..."), edit, or unsend, not a new seller message.
             return None
         handle = (data.get("handle") or {}).get("address")
         chats = data.get("chats") or []
@@ -103,6 +110,29 @@ class BlueBubblesAdapter:
             raw=payload,
             is_group=is_group_chat(chat),
         )
+
+    async def chat_destination(self, chat_guid: str) -> str | None:
+        """The alias of ours this chat is addressed to (chat.lastAddressedHandle via REST).
+
+        The new-message webhook is serialized in BlueBubbles' notification mode, which omits
+        lastAddressedHandle, so the webhook handler asks for the chat directly. Cached briefly:
+        a contact can switch from texting the phone number to texting the email.
+        """
+        now = monotonic()
+        cache = self.__dict__.setdefault("_destination_cache", {})
+        cached = cache.get(chat_guid)
+        if cached is not None and now - cached[1] < DESTINATION_CACHE_SECONDS:
+            return cached[0]
+        response = await self._client.get(
+            f"{self.server_url}/api/v1/chat/{quote(chat_guid, safe='')}",
+            params={"password": self.password},
+        )
+        response.raise_for_status()
+        data = response.json().get("data") or {}
+        alias = data.get("lastAddressedHandle")
+        destination = alias.strip().lower() if isinstance(alias, str) and alias.strip() else None
+        cache[chat_guid] = (destination, now)
+        return destination
 
     async def ping(self) -> bool:
         response = await self._client.get(

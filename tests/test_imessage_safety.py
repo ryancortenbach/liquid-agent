@@ -83,11 +83,12 @@ def test_group_chats_can_be_allowed_explicitly(tmp_path) -> None:
 
 
 def test_texts_to_the_owners_phone_number_are_ignored(tmp_path) -> None:
-    adapter = FakeMessageAdapter()
+    adapter = LookupAdapter({"iMessage;-;+14155550123": None})
     app = create_app(settings(tmp_path), photo_editor=FakePhotoEditor(), message_adapter=adapter)
     with TestClient(app) as client:
         personal = message_payload(guid="p-1", text="hey ryan", addressed_to="+16505550100")
         assert post(client, personal) == {"status": "ignored", "reason": "wrong_destination"}
+        # the webhook lacked the alias and the server has none for the chat: still refused
         unknown = message_payload(guid="p-2", text="hey", addressed_to=None)
         assert post(client, unknown) == {"status": "ignored", "reason": "wrong_destination"}
         assert adapter.sent_texts == []
@@ -124,3 +125,43 @@ def test_comma_separated_sender_allowlist(tmp_path) -> None:
         assert post(client, first)["status"] == "queued"
         assert post(client, second)["status"] == "queued"
         assert post(client, stranger) == {"status": "ignored", "reason": "sender_not_allowed"}
+
+
+def test_webhook_without_alias_is_resolved_over_rest(tmp_path) -> None:
+    """BlueBubbles webhooks never carry lastAddressedHandle; the chat lookup supplies it."""
+    adapter = LookupAdapter({"iMessage;-;+14155550123": LIQUID, "iMessage;-;+12125550199": PHONE})
+    app = create_app(settings(tmp_path), photo_editor=FakePhotoEditor(), message_adapter=adapter)
+    with TestClient(app) as client:
+        liquid = message_payload(guid="rest-1", text="hello", addressed_to=None)
+        assert post(client, liquid)["status"] == "queued"
+        assert adapter.lookups == ["iMessage;-;+14155550123"]
+        assert adapter.sent_texts
+
+        personal = message_payload(
+            guid="rest-2", text="hey", handle="+12125550199", addressed_to=None
+        )
+        assert post(client, personal) == {"status": "ignored", "reason": "wrong_destination"}
+        # the lookup is cached per chat, so the second message on the same chat needs no call
+        again = message_payload(guid="rest-3", text="hello again", addressed_to=None)
+        assert post(client, again)["status"] == "queued"
+        assert adapter.lookups.count("iMessage;-;+14155550123") == 1
+
+
+def test_destination_lookup_failure_refuses_the_message(tmp_path) -> None:
+    adapter = LookupAdapter({}, fail=True)
+    app = create_app(settings(tmp_path), photo_editor=FakePhotoEditor(), message_adapter=adapter)
+    with TestClient(app) as client:
+        result = post(client, message_payload(guid="down-1", text="hello", addressed_to=None))
+        assert result == {"status": "ignored", "reason": "destination_lookup_failed"}
+        assert adapter.sent_texts == []
+
+
+def test_tapbacks_and_edits_are_not_seller_messages(tmp_path) -> None:
+    adapter = FakeMessageAdapter()
+    app = create_app(settings(tmp_path), photo_editor=FakePhotoEditor(), message_adapter=adapter)
+    with TestClient(app) as client:
+        payload = message_payload(guid="tapback-1", text='Loved "hello"', addressed_to=LIQUID)
+        payload["data"]["associatedMessageGuid"] = "p:0/some-message"
+        payload["data"]["associatedMessageType"] = 2000
+        assert post(client, payload) == {"status": "ignored"}
+        assert adapter.sent_texts == []
