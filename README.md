@@ -26,3 +26,20 @@ iMessage (via BlueBubbles on a Mac) · eBay · Stripe · Shippo · Google Calend
 | [docs/09-brief-template.md](docs/09-brief-template.md) | Skeleton of the "system and reliability brief" we submit |
 
 Status: planning complete 2026-09-12. Code starts 2026-09-13.
+
+## Local development
+
+The deterministic core runs without external credentials:
+
+```bash
+uv sync
+uv run pytest
+uv run uvicorn app.main:app --reload
+```
+
+Open `http://localhost:8000/docs` for the API. `POST /api/plan` previews a liquidity
+frontier. `POST /api/items` creates a live item, and `POST /api/items/{item_id}/tick`
+runs the same guarded decision path used by demo and simulation clocks.
+
+Current implementation status and the ordered build queue are in
+[`docs/10-build-status.md`](docs/10-build-status.md).
