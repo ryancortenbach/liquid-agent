@@ -658,9 +658,17 @@ def create_app(
         if message is None:
             return {"status": "ignored"}
         sender_label = f"***{canonical_handle(message.handle)[-4:]}"
-        allowed_destination = app_settings.bb_allowed_destination
-        if allowed_destination and canonical_handle(message.destination_handle or "") != (
-            canonical_handle(allowed_destination)
+        allowed_destination = (app_settings.bb_allowed_destination or "").strip()
+        if not allowed_destination:
+            # Fail closed. Without a configured destination Liquid would answer every
+            # message sent to the seller's personal number, so refuse them all instead.
+            log.error(
+                "Liquid inbound refused sender=%s reason=destination_not_configured",
+                sender_label,
+            )
+            return {"status": "ignored", "reason": "destination_not_configured"}
+        if canonical_handle(message.destination_handle or "") != canonical_handle(
+            allowed_destination
         ):
             log.info(
                 "Liquid inbound ignored sender=%s reason=wrong_destination",

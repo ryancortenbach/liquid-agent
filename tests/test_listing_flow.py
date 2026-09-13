@@ -23,6 +23,7 @@ from app.models import (
 )
 
 SELLER = "+14155550123"
+AGENT_EMAIL = "ryancortenbach77@gmail.com"
 
 
 def jpeg_bytes() -> bytes:
@@ -40,7 +41,12 @@ def payload(guid: str, text: str, *, with_photo: bool = False) -> dict:
             "isFromMe": False,
             "dateCreated": 1_778_436_000_000,
             "handle": {"address": SELLER, "service": "iMessage"},
-            "chats": [{"guid": f"iMessage;-;{SELLER}"}],
+            "chats": [
+                {
+                    "guid": f"iMessage;-;{SELLER}",
+                    "lastAddressedHandle": AGENT_EMAIL,
+                }
+            ],
             "attachments": (
                 [{"guid": "attachment-guid", "mimeType": "image/jpeg", "transferName": "a.jpeg"}]
                 if with_photo
@@ -115,6 +121,7 @@ def make_settings(tmp_path: Path, **overrides) -> Settings:
         research_mode="fixture",
         bb_password="secret",
         bb_webhook_secret="webhook-secret",
+        bb_allowed_destination="ryancortenbach77@gmail.com",
         seller_handle=SELLER,
         require_ebay_onboarding=False,
         openai_api_key=None,

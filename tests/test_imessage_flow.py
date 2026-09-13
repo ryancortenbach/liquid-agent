@@ -37,7 +37,7 @@ def message_payload(
     guid: str,
     text: str,
     handle: str = "+14155550123",
-    addressed_to: str | None = None,
+    addressed_to: str | None = "ryancortenbach77@gmail.com",
     with_photo: bool = False,
 ) -> dict:
     return {
@@ -51,11 +51,7 @@ def message_payload(
             "chats": [
                 {
                     "guid": f"iMessage;-;{handle}",
-                    **(
-                        {"lastAddressedHandle": addressed_to}
-                        if addressed_to is not None
-                        else {}
-                    ),
+                    **({"lastAddressedHandle": addressed_to} if addressed_to is not None else {}),
                 }
             ],
             "attachments": (
@@ -167,6 +163,7 @@ def test_imessage_photo_preview_approval_and_deduplication(tmp_path: Path) -> No
             database_url="sqlite:///:memory:",
             photo_storage_dir=str(tmp_path),
             bb_webhook_secret="webhook-secret",
+            bb_allowed_destination="ryancortenbach77@gmail.com",
             seller_handle="+14155550123",
             require_ebay_onboarding=False,
             openai_api_key=None,
@@ -242,6 +239,7 @@ def test_imessage_webhook_rejects_bad_secret_and_other_senders(tmp_path: Path) -
             database_url="sqlite:///:memory:",
             photo_storage_dir=str(tmp_path),
             bb_webhook_secret="webhook-secret",
+            bb_allowed_destination="ryancortenbach77@gmail.com",
             seller_handle="+14155550123",
             openai_api_key=None,
         ),
@@ -320,6 +318,7 @@ def test_first_message_requires_ebay_and_blocks_photos_until_connected(tmp_path:
             database_url="sqlite:///:memory:",
             photo_storage_dir=str(tmp_path),
             bb_webhook_secret="webhook-secret",
+            bb_allowed_destination="ryancortenbach77@gmail.com",
             seller_handle="+14155550123",
             openai_api_key=None,
         ),
@@ -374,6 +373,7 @@ def test_ebay_demo_mode_auto_onboards_without_credentials(tmp_path: Path) -> Non
             database_url="sqlite:///:memory:",
             photo_storage_dir=str(tmp_path),
             bb_webhook_secret="webhook-secret",
+            bb_allowed_destination="ryancortenbach77@gmail.com",
             seller_handle="+14155550123",
             ebay_demo_mode=True,
             openai_api_key=None,
@@ -413,6 +413,7 @@ def test_unconnected_seller_can_retry_or_check_but_not_skip(tmp_path: Path) -> N
             database_url="sqlite:///:memory:",
             photo_storage_dir=str(tmp_path),
             bb_webhook_secret="webhook-secret",
+            bb_allowed_destination="ryancortenbach77@gmail.com",
             seller_handle="+14155550123",
             openai_api_key=None,
         ),
@@ -422,8 +423,12 @@ def test_unconnected_seller_can_retry_or_check_but_not_skip(tmp_path: Path) -> N
     )
 
     with TestClient(app) as client:
-        for guid, text in (("edge-1", "hello"), ("edge-2", "retry"), ("edge-3", "done"),
-                           ("edge-4", "skip")):
+        for guid, text in (
+            ("edge-1", "hello"),
+            ("edge-2", "retry"),
+            ("edge-3", "done"),
+            ("edge-4", "skip"),
+        ):
             response = client.post(
                 "/webhooks/bluebubbles?secret=webhook-secret",
                 json=message_payload(guid=guid, text=text),
@@ -442,6 +447,7 @@ def test_shared_ebay_publisher_does_not_bypass_seller_onboarding(tmp_path: Path)
             database_url="sqlite:///:memory:",
             photo_storage_dir=str(tmp_path),
             bb_webhook_secret="webhook-secret",
+            bb_allowed_destination="ryancortenbach77@gmail.com",
             seller_handle="+14155550123",
             openai_api_key=None,
         ),
@@ -470,6 +476,7 @@ def test_ebay_callback_recovers_from_decline_and_completes_on_retry(tmp_path: Pa
             database_url="sqlite:///:memory:",
             photo_storage_dir=str(tmp_path),
             bb_webhook_secret="webhook-secret",
+            bb_allowed_destination="ryancortenbach77@gmail.com",
             seller_handle="+14155550123",
             openai_api_key=None,
         ),
@@ -521,6 +528,7 @@ def test_wildcard_seller_handle_accepts_multiple_sellers(tmp_path: Path) -> None
             database_url="sqlite:///:memory:",
             photo_storage_dir=str(tmp_path),
             bb_webhook_secret="webhook-secret",
+            bb_allowed_destination="ryancortenbach77@gmail.com",
             seller_handle="*",
             require_ebay_onboarding=False,
             openai_api_key=None,
@@ -553,6 +561,7 @@ def test_start_over_cancels_active_draft_and_resets_conversation(tmp_path: Path)
             database_url="sqlite:///:memory:",
             photo_storage_dir=str(tmp_path),
             bb_webhook_secret="webhook-secret",
+            bb_allowed_destination="ryancortenbach77@gmail.com",
             seller_handle="+14155550123",
             require_ebay_onboarding=False,
             openai_api_key=None,
@@ -596,6 +605,7 @@ def test_ai_chat_uses_workflow_context_and_sends_one_reply(tmp_path: Path) -> No
             database_url="sqlite:///:memory:",
             photo_storage_dir=str(tmp_path),
             bb_webhook_secret="webhook-secret",
+            bb_allowed_destination="ryancortenbach77@gmail.com",
             seller_handle="+14155550123",
             require_ebay_onboarding=False,
             openai_api_key=None,
@@ -611,9 +621,7 @@ def test_ai_chat_uses_workflow_context_and_sends_one_reply(tmp_path: Path) -> No
             json=message_payload(guid="ai-1", text="What do I do with this thing?"),
         )
         assert response.json()["status"] == "queued"
-        assert adapter.sent_texts == [
-            "Send a product photo, and I will help identify and list it."
-        ]
+        assert adapter.sent_texts == ["Send a product photo, and I will help identify and list it."]
         assert interpreter.contexts[0]["conversation_status"] == "ready"
         assert interpreter.contexts[0]["recent_messages"][-1]["text"] == (
             "What do I do with this thing?"
@@ -625,6 +633,50 @@ def test_ai_chat_uses_workflow_context_and_sends_one_reply(tmp_path: Path) -> No
             assert [turn.role for turn in turns] == ["user", "assistant"]
 
 
+def test_long_multi_item_message_bypasses_ai_and_requests_separate_photos(
+    tmp_path: Path,
+) -> None:
+    adapter = FakeMessageAdapter()
+    interpreter = FakeChatInterpreter(
+        ChatInterpretation(intent=ChatIntent.REPLY, reply="This should not be sent.")
+    )
+    app = create_app(
+        Settings(
+            mode=Mode.SIM,
+            database_url="sqlite:///:memory:",
+            photo_storage_dir=str(tmp_path),
+            bb_webhook_secret="webhook-secret",
+            bb_allowed_destination="ryancortenbach77@gmail.com",
+            seller_handle="+14155550123",
+            require_ebay_onboarding=False,
+            openai_api_key=None,
+        ),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+        chat_interpreter=interpreter,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/webhooks/bluebubbles?secret=webhook-secret",
+            json=message_payload(
+                guid="separate-text-1",
+                text=("I want to sell my AirPods and then I want to sell my water bottle"),
+            ),
+        )
+
+        assert response.json()["status"] == "queued"
+        assert interpreter.contexts == []
+        assert adapter.sent_texts == [
+            "I caught 2 separate items and won't combine them:\n"
+            "1. AirPods\n"
+            "2. water bottle\n"
+            "Send one photo per item, or attach everything with a BATCH label."
+        ]
+        with Session(app.state.engine) as session:
+            assert session.exec(select(Item)).all() == []
+
+
 def test_messages_from_one_seller_are_processed_serially(tmp_path: Path) -> None:
     adapter = FakeMessageAdapter()
     interpreter = SlowChatInterpreter()
@@ -634,6 +686,7 @@ def test_messages_from_one_seller_are_processed_serially(tmp_path: Path) -> None
             database_url="sqlite:///:memory:",
             photo_storage_dir=str(tmp_path),
             bb_webhook_secret="webhook-secret",
+            bb_allowed_destination="ryancortenbach77@gmail.com",
             seller_handle="+14155550123",
             require_ebay_onboarding=False,
             openai_api_key=None,
@@ -669,6 +722,7 @@ def test_ai_status_intent_does_not_get_consumed_as_listing_details(tmp_path: Pat
             database_url="sqlite:///:memory:",
             photo_storage_dir=str(tmp_path),
             bb_webhook_secret="webhook-secret",
+            bb_allowed_destination="ryancortenbach77@gmail.com",
             seller_handle="+14155550123",
             require_ebay_onboarding=False,
             openai_api_key=None,
@@ -702,3 +756,77 @@ def test_ai_status_intent_does_not_get_consumed_as_listing_details(tmp_path: Pat
             item = session.exec(select(Item)).one()
             assert conversation.status == ConversationStatus.AWAITING_DETAILS
             assert item.constraints_json["intake_asked"] == ["condition"]
+
+
+def test_imessage_refuses_everything_when_no_destination_is_configured(tmp_path: Path) -> None:
+    """An unset BB_ALLOWED_DESTINATION must block inbound, never open it to every text."""
+    adapter = FakeMessageAdapter()
+    interpreter = FakeChatInterpreter(
+        ChatInterpretation(intent=ChatIntent.REPLY, reply="This must not be sent")
+    )
+    app = create_app(
+        Settings(
+            mode=Mode.SIM,
+            database_url="sqlite:///:memory:",
+            photo_storage_dir=str(tmp_path),
+            bb_webhook_secret="webhook-secret",
+            bb_allowed_destination=None,
+            seller_handle="*",
+            require_ebay_onboarding=False,
+            openai_api_key=None,
+        ),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+        chat_interpreter=interpreter,
+    )
+    with TestClient(app) as client:
+        for addressed_to in ("+17027428016", "ryancortenbach77@gmail.com", None):
+            response = client.post(
+                "/webhooks/bluebubbles?secret=webhook-secret",
+                json=message_payload(
+                    guid=f"unconfigured-{addressed_to}",
+                    text="Write a response for me",
+                    addressed_to=addressed_to,
+                ),
+            )
+            assert response.json() == {
+                "status": "ignored",
+                "reason": "destination_not_configured",
+            }
+        assert adapter.sent_texts == []
+        assert interpreter.contexts == []
+        with Session(app.state.engine) as session:
+            assert session.exec(select(WebhookReceipt)).all() == []
+
+
+def test_imessage_blank_destination_setting_is_treated_as_unconfigured(tmp_path: Path) -> None:
+    """Whitespace in the env file must not be read as a permissive wildcard."""
+    adapter = FakeMessageAdapter()
+    app = create_app(
+        Settings(
+            mode=Mode.SIM,
+            database_url="sqlite:///:memory:",
+            photo_storage_dir=str(tmp_path),
+            bb_webhook_secret="webhook-secret",
+            bb_allowed_destination="   ",
+            seller_handle="*",
+            require_ebay_onboarding=False,
+            openai_api_key=None,
+        ),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/webhooks/bluebubbles?secret=webhook-secret",
+            json=message_payload(
+                guid="blank-destination",
+                text="status",
+                addressed_to="ryancortenbach77@gmail.com",
+            ),
+        )
+        assert response.json() == {
+            "status": "ignored",
+            "reason": "destination_not_configured",
+        }
+        assert adapter.sent_texts == []
