@@ -49,6 +49,7 @@ from app.market.ebay import (
     EbaySandboxClient,
 )
 from app.market.ebay_oauth import EbayConnectionService, EbayOAuthClient
+from app.market.ebay_taxonomy import EbayTaxonomyClient
 from app.market.fees import instant_quote_cents
 from app.market.publish_service import EbayPublishError
 from app.models import (
@@ -301,7 +302,20 @@ def create_app(
                     if app.state.ebay_connections is not None
                     else None
                 ),
-                require_ebay_onboarding=app_settings.require_ebay_onboarding,
+                # Per-seller onboarding only gates intake when it is the sole way to publish:
+                # a sandbox refresh token in .env (or an injected publisher) serves every seller.
+                require_ebay_onboarding=(
+                    app_settings.require_ebay_onboarding
+                    and app.state.ebay_connections is not None
+                    and ebay_publisher is None
+                    and not all(
+                        (
+                            app_settings.ebay_sb_client_id,
+                            app_settings.ebay_sb_client_secret,
+                            app_settings.ebay_sb_refresh_token,
+                        )
+                    )
+                ),
                 identifier=app.state.identifier,
                 reviewer=app.state.photo_reviewer,
             )
@@ -321,6 +335,15 @@ def create_app(
             )
             app.state.owns_ebay_publisher = True
         app.state.comps_sources = build_comps_sources(app_settings)
+        app.state.ebay_taxonomy = (
+            EbayTaxonomyClient(
+                app_settings.ebay_client_id,
+                app_settings.ebay_client_secret,
+                marketplace_id=app_settings.ebay_marketplace_id,
+            )
+            if app_settings.ebay_client_id and app_settings.ebay_client_secret
+            else None
+        )
         polish = (
             (
                 lambda draft: polish_with_claude(
@@ -345,6 +368,8 @@ def create_app(
                 else None
             ),
             polish=polish,
+            ebay_taxonomy=app.state.ebay_taxonomy,
+            photo_storage=app.state.photo_storage,
         )
         if app.state.seller_router is not None:
             app.state.seller_router = PipelineRouter(
@@ -376,6 +401,8 @@ def create_app(
             await app.state.ebay_publisher.close()
         if app.state.owns_ebay_connections and app.state.ebay_connections is not None:
             await app.state.ebay_connections.close()
+        if getattr(app.state, "ebay_taxonomy", None) is not None:
+            await app.state.ebay_taxonomy.close()
 
     app = FastAPI(title="Liquid", version="0.1.0", lifespan=lifespan)
     app.include_router(dashboard_router)
@@ -676,6 +703,8 @@ def create_app(
                 category_id=body.category_id,
                 description=body.description,
                 aspects=body.aspects,
+                taxonomy=request.app.state.ebay_taxonomy,
+                photo_storage=request.app.state.photo_storage,
             )
         except EbayPublishError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

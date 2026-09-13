@@ -24,6 +24,7 @@ from app.listing.draft import CONDITION_LABEL, ListingDraft, build_listing_draft
 from app.listing.handoff import build_handoffs, dollars
 from app.listing.pack import replace_draft_packs
 from app.market.ebay import EbayPublisher
+from app.market.ebay_taxonomy import EbayTaxonomyClient
 from app.market.publish_service import EbayPublishError, publish_item_to_ebay, sandbox_listing_url
 from app.models import (
     ConversationStatus,
@@ -36,6 +37,7 @@ from app.models import (
     ResearchResult,
     SellerConversation,
 )
+from app.photos.storage import PhotoStorage
 from app.pricing.schedule import PriceSchedule, describe_schedule, plan_item_price
 from app.research.comps import research_item
 from app.research.sources import CompsSource
@@ -103,6 +105,8 @@ class ListingFlow:
         ebay_publisher: EbayPublisher | None = None,
         ebay_publisher_for_seller: Callable[[str], EbayPublisher | None] | None = None,
         polish: Callable[[ListingDraft], ListingDraft] | None = None,
+        ebay_taxonomy: EbayTaxonomyClient | None = None,
+        photo_storage: PhotoStorage | None = None,
     ) -> None:
         self.engine = engine
         self.clock = clock
@@ -112,6 +116,8 @@ class ListingFlow:
         self.ebay_publisher = ebay_publisher
         self.ebay_publisher_for_seller = ebay_publisher_for_seller
         self.polish = polish
+        self.ebay_taxonomy = ebay_taxonomy
+        self.photo_storage = photo_storage
 
     # ---------- storage helpers ----------
     def _load(self, session: Session, handle: str) -> tuple[SellerConversation | None, Item | None]:
@@ -482,6 +488,8 @@ class ListingFlow:
                         title=draft.title,
                         description=draft.description,
                         aspects=draft.aspects,
+                        taxonomy=self.ebay_taxonomy,
+                        photo_storage=self.photo_storage,
                     )
                     listing_url = (
                         sandbox_listing_url(result.listing_id) if result.listing_id else None

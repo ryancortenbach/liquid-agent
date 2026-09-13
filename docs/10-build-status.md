@@ -30,7 +30,7 @@ Updated 2026-09-13.
 ## Ordered P0 queue
 
 1. Complete a live BlueBubbles and OpenAI smoke test after credentials are configured.
-2. Complete a live eBay sandbox smoke test after seller policies are configured.
+2. Run `uv run python scripts/ebay_verify.py --publish` once sandbox keys land; policy and location setup is scripted (`scripts/ebay_setup.py`).
 3. Build the assisted Facebook Marketplace publication flow.
 4. Add the outbox delivery worker and restart tests.
 5. Build the demo dashboard and recorded scenario.
