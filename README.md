@@ -30,8 +30,6 @@ two comps scrapes, all at list prices).
 | Gmail offer and sale detection | Built and unit-tested; the live OAuth consent flow was not exercised today. |
 | Facebook Marketplace and OfferUp | Copy-ready handoff files by design. Neither has a posting API. |
 
-Demo listing produced today by the demo-mode eBay path (served from a laptop, may be offline):
-<https://sara-camel-jon-contractors.trycloudflare.com/demo/ebay/listings/demo-listing-856972f6fbb6>
 
 ## 02 External apps used
 
