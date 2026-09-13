@@ -317,6 +317,35 @@ def test_demo_yes_is_acknowledged_before_waiting_for_the_seller_lock(tmp_path: P
     assert "eBay demo preview is ready" in adapter.sent_texts[-1]
 
 
+def test_demo_yes_after_last_detail_builds_and_publishes_the_mock(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    app = create_app(
+        make_settings(
+            tmp_path,
+            public_base_url="https://demo.example.com",
+            ebay_demo_mode=True,
+        ),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+    )
+
+    with TestClient(app) as client:
+        send(client, "auto-1", "Sony WH-1000XM5 headphones", with_photo=True)
+        send(client, "auto-2", "approve")
+        send(client, "auto-3", "like new, just the item")
+        before_confirmation = len(adapter.sent_texts)
+        send(client, "auto-4", "yes")
+
+        new_messages = adapter.sent_texts[before_confirmation:]
+        assert new_messages[0] == "Got it. I'm on it."
+        assert any("eBay demo preview is ready" in text for text in new_messages)
+        assert not any(text.startswith("Here's the plan") for text in new_messages)
+        with Session(app.state.engine) as session:
+            assert session.exec(select(SellerConversation)).one().status == (
+                ConversationStatus.LISTED
+            )
+
+
 def test_publishing_advances_to_next_batch_item(tmp_path: Path) -> None:
     adapter = FakeMessageAdapter()
     app = create_app(

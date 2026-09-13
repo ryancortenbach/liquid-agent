@@ -216,13 +216,21 @@ class ListingFlow:
             if following:
                 await self._send(chat_guid, QUESTION_SETS[following], f"{key}:q-{following}")
                 return True
+            auto_publish_demo = self.settings.ebay_demo_mode and lowered == "yes"
             if lowered not in GO_WORDS:
                 await self._send(
                     chat_guid,
                     "Perfect. I'm checking what these actually sell for now.",
                     f"{key}:researching",
                 )
-            await self.plan(item_id, research=True, chat_guid=chat_guid, key=key)
+            await self.plan(
+                item_id,
+                research=True,
+                chat_guid=None if auto_publish_demo else chat_guid,
+                key=key,
+            )
+            if auto_publish_demo:
+                await self.publish(item_id, chat_guid=chat_guid, key=key)
             return True
 
         if status == ConversationStatus.RESEARCHING:
