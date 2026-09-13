@@ -14,6 +14,12 @@ from sqlmodel import Session, select
 from app.channels.base import InboundMessage
 from app.channels.imessage_bluebubbles import BlueBubblesAdapter
 from app.clock import Clock
+from app.inbound.identify import (
+    Identifier,
+    ItemIdentity,
+    apply_identity,
+    interpret_confirmation,
+)
 from app.ledger import write_decision
 from app.models import (
     ConditionGrade,
@@ -114,6 +120,7 @@ class SellerMessageRouter:
         seller_handle: str,
         timezone: str,
         ebay_authorization_url: Callable[[str], str] | None = None,
+        identifier: Identifier | None = None,
     ) -> None:
         self.engine = engine
         self.clock = clock
@@ -125,6 +132,7 @@ class SellerMessageRouter:
         )
         self.timezone = timezone
         self.ebay_authorization_url = ebay_authorization_url
+        self.identifier = identifier
 
     def accepts(self, message: InboundMessage) -> bool:
         return self.seller_handle is None or canonical_handle(message.handle) == self.seller_handle
@@ -135,6 +143,8 @@ class SellerMessageRouter:
         lowered = message.text.strip().lower()
         if lowered == "connect ebay":
             await self._connect_ebay(message)
+            return
+        if not message.attachments and await self._confirm_identity(message):
             return
         if lowered in APPROVE_WORDS:
             await self._review_pending(message, approved=True)
@@ -257,13 +267,6 @@ class SellerMessageRouter:
         return item
 
     async def _process_photo(self, message: InboundMessage) -> None:
-        if self.editor is None:
-            await self.adapter.send_text(
-                message.chat_guid,
-                "I received the photo, but OpenAI image editing is not configured yet.",
-                f"{message.guid}:missing-editor",
-            )
-            return
         attachment = next(
             (
                 value
@@ -290,21 +293,194 @@ class SellerMessageRouter:
             item_id = item.id
             conversation_id = conversation.id
 
+        mime_type = attachment.mime_type or mimetypes.guess_type(attachment.filename or "")[0]
+        try:
+            content = await self.adapter.download_attachment_bytes(attachment.guid)
+            if mime_type is None:
+                raise PhotoPipelineError("photo media type is missing")
+        except Exception:
+            await self._fail_photo(message, conversation_id)
+            return
+
+        if self.identifier is not None:
+            identity = await self.identifier.identify(content, mime_type, message.text)
+            with Session(self.engine) as session:
+                item = session.get(Item, item_id)
+                conversation = session.get(SellerConversation, conversation_id)
+                if item is None or conversation is None:
+                    raise LookupError("item or conversation was lost")
+                self._apply_identity(item, identity)
+                item.constraints_json = {
+                    **item.constraints_json,
+                    "pending_attachment": {"guid": attachment.guid, "mime_type": mime_type},
+                }
+                conversation.status = ConversationStatus.AWAITING_IDENTITY
+                conversation.updated_at = self.clock.now()
+                session.add(item)
+                session.add(conversation)
+                write_decision(
+                    session,
+                    item_id=item.id,
+                    sim_at=self.clock.now(),
+                    wall_at=self.clock.wall(),
+                    kind="system",
+                    action="identify",
+                    inputs={
+                        "title": identity.title,
+                        "confidence": identity.confidence,
+                        "candidates": [c.title for c in identity.candidates],
+                    },
+                    reason="asked the seller to confirm the identified item before listing",
+                    price_before=None,
+                    price_after=None,
+                )
+                session.commit()
+            await self.adapter.send_text(
+                message.chat_guid, identity.question(), f"{message.guid}:identify"
+            )
+            return
+
+        await self._enhance_or_store(message, item_id, conversation_id, content, mime_type)
+
+    @staticmethod
+    def _apply_identity(item: Item, identity: ItemIdentity) -> None:
+        caption_title = item.constraints_json.get("original_caption", "")
+        if identity.confidence >= 0.6 or parse_title(caption_title) == "Item from iMessage":
+            item.title = identity.title[:120]
+        item.brand = identity.brand or item.brand
+        item.model = identity.model or item.model
+        if identity.category != "other" or item.category == "other":
+            item.category = identity.category
+        if identity.condition_guess in {"A", "B", "C"}:
+            item.condition = ConditionGrade(identity.condition_guess)
+        item.confidence = identity.confidence
+        item.constraints_json = apply_identity(item.constraints_json, identity)
+
+    async def _confirm_identity(self, message: InboundMessage) -> bool:
+        """Handle the reply to "is it this?"; returns True when the message was consumed."""
+        with Session(self.engine) as session:
+            conversation = session.exec(
+                select(SellerConversation).where(SellerConversation.handle == message.handle)
+            ).first()
+            if (
+                conversation is None
+                or conversation.status != ConversationStatus.AWAITING_IDENTITY
+                or conversation.active_item_id is None
+            ):
+                return False
+            item = session.get(Item, conversation.active_item_id)
+            if item is None:
+                return False
+            identity = ItemIdentity.model_validate(item.constraints_json.get("identity") or {})
+            kind, title = interpret_confirmation(message.text, identity)
+            if kind == "named" and not title:
+                await self.adapter.send_text(
+                    message.chat_guid,
+                    identity.question(),
+                    f"{message.guid}:identify-repeat",
+                )
+                return True
+            if kind != "yes" and title:
+                item.title = title[:120]
+                item.confidence = 1.0
+            elif kind == "yes":
+                item.confidence = max(item.confidence, 0.95)
+            pending = item.constraints_json.get("pending_attachment") or {}
+            conversation.status = ConversationStatus.PROCESSING_PHOTO
+            conversation.updated_at = self.clock.now()
+            session.add(item)
+            session.add(conversation)
+            write_decision(
+                session,
+                item_id=item.id,
+                sim_at=self.clock.now(),
+                wall_at=self.clock.wall(),
+                kind="seller",
+                action="confirm_identity",
+                inputs={"reply": message.text, "title": item.title},
+                reason="seller confirmed what the item is",
+                price_before=None,
+                price_after=None,
+            )
+            session.commit()
+            item_id = item.id
+            conversation_id = conversation.id
+
+        try:
+            content = await self.adapter.download_attachment_bytes(pending["guid"])
+            mime_type = pending.get("mime_type") or "image/jpeg"
+        except Exception:
+            await self._fail_photo(message, conversation_id)
+            return True
+        await self._enhance_or_store(message, item_id, conversation_id, content, mime_type)
+        return True
+
+    async def _fail_photo(self, message: InboundMessage, conversation_id: str) -> None:
+        with Session(self.engine) as session:
+            conversation = session.get(SellerConversation, conversation_id)
+            if conversation is not None:
+                conversation.status = ConversationStatus.READY
+                session.add(conversation)
+                session.commit()
+        await self.adapter.send_text(
+            message.chat_guid,
+            "I could not process that photo. Try sending it again as a normal photo.",
+            f"{message.guid}:failed",
+        )
+
+    async def _store_original_only(
+        self, message: InboundMessage, item_id: str, conversation_id: str, content: bytes, mime: str
+    ) -> None:
+        """No image editor configured: keep the original and continue to the listing questions."""
+        with Session(self.engine) as session:
+            item = session.get(Item, item_id)
+            conversation = session.get(SellerConversation, conversation_id)
+            if item is None or conversation is None:
+                raise LookupError("item or conversation was lost")
+            try:
+                stored = self.storage.save_original(item.id, content, mime)
+            except ValueError:
+                session.rollback()
+                await self._fail_photo(message, conversation_id)
+                return
+            original = ProductPhoto(
+                item_id=item.id,
+                role=PhotoRole.ORIGINAL,
+                status=PhotoStatus.ORIGINAL,
+                file_path=stored.relative_path,
+                mime_type=stored.mime_type,
+                sha256=stored.sha256,
+            )
+            session.add(original)
+            item.photo_paths = [*item.photo_paths, stored.relative_path]
+            conversation.status = ConversationStatus.AWAITING_DETAILS
+            conversation.updated_at = self.clock.now()
+            session.add(item)
+            session.add(conversation)
+            session.commit()
+        await self.adapter.send_text(
+            message.chat_guid,
+            "got the photo. photo cleanup is off right now, so i'll list with your original.",
+            f"{message.guid}:original-only",
+        )
+
+    async def _enhance_or_store(
+        self, message: InboundMessage, item_id: str, conversation_id: str, content: bytes, mime: str
+    ) -> None:
+        if self.editor is None:
+            await self._store_original_only(message, item_id, conversation_id, content, mime)
+            return
         await self.adapter.send_text(
             message.chat_guid,
             "Got it. I am preparing a cleaner, truthful listing photo now.",
             f"{message.guid}:processing",
         )
         try:
-            content = await self.adapter.download_attachment_bytes(attachment.guid)
-            mime_type = attachment.mime_type or mimetypes.guess_type(attachment.filename or "")[0]
-            if mime_type is None:
-                raise PhotoPipelineError("photo media type is missing")
             result = await enhance_product_photo(
                 engine=self.engine,
                 item_id=item_id,
                 content=content,
-                mime_type=mime_type,
+                mime_type=mime,
                 preset=PhotoPreset.STUDIO,
                 editor=self.editor,
                 storage=self.storage,

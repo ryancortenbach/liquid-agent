@@ -1,0 +1,23 @@
+{
+  "project": "Liquid",
+  "written": "2026-09-13T04:45:00-04:00",
+  "note": "Pre-registered expectations for the marketplace twin, written before any product code, all from ONE world model (the spined twin: buyers counter, ghost, and fail payment). Sunday's twin must reproduce these within Monte Carlo error (about +/- $5 on means, +/- 3 points on sold rates) or the brief reports the miss. Gaps and edges were computed from unrounded means; recomputing them from the rounded figures shown here can differ by $1.",
+  "item": {"name": "iPad Air 5th gen 64GB Wi-Fi, good", "M": 303, "sigma": 35, "floor": 220, "instant_S": 221, "instant_ratio_observed": 0.73},
+  "arrivals_per_day": {"local": 2, "marketplace": 4},
+  "fees": {"marketplace": "13.25% + 0.30", "local_stripe": "2.9% + 0.30", "instant": "0"},
+  "twin_buyers": {"counter_if_list_within": 0.15, "offer_fraction_of_value": [0.85, 1.0], "ghost_after_counter": 0.30, "payment_fail": {"local": 0.10, "marketplace": 0.03}},
+  "policy": "finite-horizon DP on a 15-minute grid, prices floor..1.3M, accept any offer whose net >= continuation value, else counter at the smallest price whose net does",
+  "baselines": {"static_list": "list at M, no offers accepted", "best_offer_proxy": "list at M, accept any offer at or above 0.9M at the buyer's price, auto-decline below"},
+  "expectations": [
+    {"deadline_h": 12,  "dp_value": 264, "agent_mean_net": 265, "agent_sold_pct": 85,  "static_list": 260, "static_sold_pct": 75, "best_offer_proxy": 258, "best_offer_sold_pct": 90,  "edge_vs_best_offer": 7,  "dp_twin_gap": 1},
+    {"deadline_h": 24,  "dp_value": 280, "agent_mean_net": 282, "agent_sold_pct": 95,  "static_list": 270, "static_sold_pct": 94, "best_offer_proxy": 263, "best_offer_sold_pct": 99,  "edge_vs_best_offer": 19, "dp_twin_gap": 2},
+    {"deadline_h": 72,  "dp_value": 304, "agent_mean_net": 306, "agent_sold_pct": 100, "static_list": 272, "static_sold_pct": 100, "best_offer_proxy": 263, "best_offer_sold_pct": 100, "edge_vs_best_offer": 43, "dp_twin_gap": 2},
+    {"deadline_h": 168, "dp_value": 319, "agent_mean_net": 322, "agent_sold_pct": 100, "static_list": 272, "static_sold_pct": 100, "best_offer_proxy": 263, "best_offer_sold_pct": 100, "edge_vs_best_offer": 59, "dp_twin_gap": 2}
+  ],
+  "price_path_72h": {"72": 355, "48": 348, "24": 335, "12": 322, "8": 316, "4": 307, "2": 302, "1": 299, "0.5": 298},
+  "frontier_card_72h_deadline": {"guaranteed_now": 221, "p_sold_by_24h_pct": 64, "mean_net_given_sold_by_24h": 311, "p_sold_by_48h_pct": 92, "p_sold_by_72h_pct": 100, "mean_net_given_sold": 306, "median_net_given_sold": 304, "expected_net": 306, "dp_value_72h": 304},
+  "sensitivity_72h_agent_vs_static": {"value_minus_10pct": {"agent": 284, "agent_sold_pct": 91, "static": 271}, "value_plus_10pct": {"agent": 314, "static": 273}, "arrivals_x0.5": {"agent": 295, "agent_sold_pct": 93, "static": 272}, "arrivals_x1.5": {"agent": 309, "static": 272}, "pay_fail_15pct": {"agent": 306, "static": 273}, "sigma_true_20": {"agent": 296, "static": 272}, "sigma_true_50": {"agent": 311, "static": 272}},
+  "where_we_lose": "No sensitivity cell loses when buyers can counter. With list-price-only buyers (no counteroffers), a 10% overestimate of value costs $261 vs $272 for a static listing; that regime is why I12 and I13 exist.",
+  "invariant_violations_expected": 0,
+  "floor_breaches_expected": 0
+}
