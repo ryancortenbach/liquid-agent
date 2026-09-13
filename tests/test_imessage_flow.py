@@ -360,7 +360,7 @@ def test_shared_ebay_publisher_does_not_bypass_seller_onboarding(tmp_path: Path)
         )
 
         assert response.json()["status"] == "queued"
-        assert adapter.sent_texts[-1].startswith("Welcome to Liquid")
+        assert adapter.sent_texts[-1].startswith("hey! first, connect your ebay")
 
 
 def test_ebay_callback_recovers_from_decline_and_completes_on_retry(tmp_path: Path) -> None:
@@ -593,7 +593,7 @@ def test_ai_status_intent_does_not_get_consumed_as_listing_details(tmp_path: Pat
             json=message_payload(guid="ai-status-3", text="Where are we with that?"),
         )
 
-        assert "Current step: awaiting_details" in adapter.sent_texts[-1]
+        assert "waiting on your last answer" in adapter.sent_texts[-1]
         with Session(app.state.engine) as session:
             conversation = session.exec(select(SellerConversation)).one()
             item = session.exec(select(Item)).one()
