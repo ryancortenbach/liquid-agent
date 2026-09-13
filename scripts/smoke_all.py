@@ -117,10 +117,13 @@ async def run(live: bool) -> int:
         )
     )
 
+    gmail_callback = settings.gmail_oauth_redirect_uri or (
+        f"{settings.public_base_url.rstrip('/')}/oauth/google/gmail/callback"
+    )
     gmail_ready = (
         Path(settings.gmail_oauth_client_json).exists()
         and configured(settings.app_secret)
-        and settings.public_base_url.startswith("https://")
+        and gmail_callback.startswith("https://")
     )
     results.append(
         (
