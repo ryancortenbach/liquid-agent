@@ -114,6 +114,7 @@ def test_enhance_is_unavailable_without_openai_configuration(tmp_path: Path) -> 
             mode=Mode.SIM,
             database_url="sqlite:///:memory:",
             photo_storage_dir=str(tmp_path),
+            openai_api_key=None,
         )
     )
     with TestClient(app) as client:
