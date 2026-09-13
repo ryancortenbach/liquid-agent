@@ -830,3 +830,46 @@ def test_imessage_blank_destination_setting_is_treated_as_unconfigured(tmp_path:
             "reason": "destination_not_configured",
         }
         assert adapter.sent_texts == []
+
+
+def test_destination_wildcard_accepts_any_address_but_still_checks_the_sender(
+    tmp_path: Path,
+) -> None:
+    """BlueBubbles cannot report the destination, so "*" leans on the sender allowlist."""
+    adapter = FakeMessageAdapter()
+    app = create_app(
+        Settings(
+            mode=Mode.SIM,
+            database_url="sqlite:///:memory:",
+            photo_storage_dir=str(tmp_path),
+            bb_webhook_secret="webhook-secret",
+            bb_allowed_destination="*",
+            seller_handle="+14155550123",
+            require_ebay_onboarding=False,
+            openai_api_key=None,
+        ),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+    )
+    with TestClient(app) as client:
+        allowed = client.post(
+            "/webhooks/bluebubbles?secret=webhook-secret",
+            json=message_payload(
+                guid="wildcard-1",
+                text="status",
+                handle="+14155550123",
+                addressed_to="+17027428016",
+            ),
+        )
+        assert allowed.json() == {"status": "queued"}
+
+        stranger = client.post(
+            "/webhooks/bluebubbles?secret=webhook-secret",
+            json=message_payload(
+                guid="wildcard-2",
+                text="status",
+                handle="+12125550147",
+                addressed_to="+17027428016",
+            ),
+        )
+        assert stranger.json() == {"status": "ignored", "reason": "sender_not_allowed"}

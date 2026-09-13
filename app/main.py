@@ -670,9 +670,13 @@ def create_app(
                 sender_label,
             )
             return {"status": "ignored", "reason": "destination_not_configured"}
-        if canonical_handle(message.destination_handle or "") != canonical_handle(
-            allowed_destination
-        ):
+        # BlueBubbles does not report which of the seller's addresses a message was sent
+        # to: lastAddressedHandle is the seller's own sending identity and reads the same
+        # for every chat. "*" accepts any destination and leaves the sender allowlist as
+        # the control that decides who may reach Liquid.
+        if allowed_destination != "*" and canonical_handle(
+            message.destination_handle or ""
+        ) != canonical_handle(allowed_destination):
             log.info(
                 "Liquid inbound ignored sender=%s reason=wrong_destination",
                 sender_label,
