@@ -89,9 +89,9 @@ after 10 minutes.
   and OfferUp, and steps the price down your schedule as time passes.
 - **One orchestrator.** The seller router and listing flow orchestrate every step; vision, research,
   pricing, listing copy, and publishing are tools it calls in sequence with a ledger row each.
-- **External apps.** iMessage through BlueBubbles, OpenAI for the truthful photo edit, Apify's eBay
+- **External apps.** iMessage through BlueBubbles, OpenAI for item identification and the truthful photo edit, Apify's eBay
   sold and active listing actors for comps, eBay (Browse API in production for comps, Sell API in
-  the sandbox for publishing and repricing), Claude for identification, parsing, and copy. Sandbox
+  the sandbox for publishing and repricing), Claude optionally for listing copy polish. Sandbox
   and test environments are used where a marketplace offers them.
 - **Demo video (2 minutes).** _link to be added before submission_
 - **Run it.** `uv sync --all-extras`, copy `.env.example` to `.env`, then `uv run uvicorn app.main:app`.

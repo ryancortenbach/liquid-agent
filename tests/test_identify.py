@@ -16,6 +16,7 @@ from app.inbound.identify import (
 from app.main import create_app
 from app.models import ConversationStatus, Item, LedgerEvent, ProductPhoto, SellerConversation
 from tests.test_listing_flow import (
+    SELLER,
     FakeMessageAdapter,
     FakePhotoEditor,
     jpeg_bytes,
@@ -102,9 +103,11 @@ def test_openai_identifier_sends_image_and_parses_identity() -> None:
     assert calls[0]["store"] is False
     assert calls[0]["text_format"] is ItemIdentity
     content = calls[0]["input"][0]["content"]
-    assert content[0]["type"] == "input_image"
-    assert content[0]["image_url"].startswith("data:image/jpeg;base64,")
-    assert content[1]["text"] == "Seller's caption: sell this"
+    image_input = next(value for value in content if value["type"] == "input_image")
+    text_input = next(value for value in content if value["type"] == "input_text")
+    assert image_input["image_url"].startswith("data:image/jpeg;base64,")
+    assert image_input["detail"] == "high"
+    assert text_input["text"] == "Seller's caption: sell this"
 
 
 def test_openai_identifier_falls_back_to_caption() -> None:
@@ -177,3 +180,97 @@ def test_named_correction_and_no_editor_fallback(tmp_path: Path) -> None:
             assert len(photos) == 1 and photos[0].role.value == "original"
             conversation = session.exec(select(SellerConversation)).one()
             assert conversation.status == ConversationStatus.AWAITING_DETAILS
+
+
+def test_openai_identifier_parses_and_normalizes(tmp_path: Path) -> None:
+    import asyncio
+
+    from app.inbound.identify import OpenAIIdentifier
+
+    class FakeParsed:
+        output_parsed = ItemIdentity(
+            title="Apple iPad Air (5th generation) 64GB",
+            brand="Apple",
+            category="Tablet",
+            condition_guess="good",
+            confidence=0.68,
+        )
+
+    class FakeResponses:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def parse(self, **kwargs):
+            self.calls.append(kwargs)
+            return FakeParsed()
+
+    class FakeClient:
+        responses = FakeResponses()
+
+    from io import BytesIO
+
+    from PIL import Image
+
+    buffer = BytesIO()
+    Image.new("RGB", (40, 30), (10, 20, 30)).save(buffer, format="JPEG")
+    identifier = OpenAIIdentifier("key", model="gpt-5.1", client=FakeClient())
+    identity = asyncio.run(identifier.identify(buffer.getvalue(), "image/jpeg", "ipad"))
+    assert identity.category == "tablet" and identity.condition_guess == "B"
+    call = FakeClient.responses.calls[0]
+    assert call["model"] == "gpt-5.1" and call["reasoning"] == {"effort": "low"}
+    assert call["store"] is False
+    assert call["input"][0]["content"][1]["image_url"].startswith("data:image/jpeg;base64,")
+    assert call["text_format"] is ItemIdentity
+
+    class BrokenClient:
+        class responses:  # noqa: N801
+            @staticmethod
+            async def parse(**kwargs):
+                raise RuntimeError("boom")
+
+    fallback = OpenAIIdentifier("key", client=BrokenClient())
+    identity = asyncio.run(
+        fallback.identify(buffer.getvalue(), "image/jpeg", "Sony WH-1000XM5 headphones")
+    )
+    assert identity.title == "Sony WH-1000XM5 headphones" and identity.confidence == 0.5
+
+
+def test_identify_endpoint_returns_identity_and_applies_to_item(tmp_path: Path) -> None:
+    from io import BytesIO
+
+    from PIL import Image
+
+    app = create_app(make_settings(tmp_path, seller_handle=None), identifier=FakeIdentifier())
+    with TestClient(app) as client:
+        buffer = BytesIO()
+        Image.new("RGB", (16, 12), (1, 2, 3)).save(buffer, format="JPEG")
+        response = client.post(
+            "/api/identify",
+            files={"upload": ("ipad.jpg", buffer.getvalue(), "image/jpeg")},
+            data={"caption": "my ipad"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["title"] == IDENTITY.title and body["question"].startswith("looks like")
+
+        item_id = client.post(
+            "/api/items",
+            json={
+                "seller_handle": SELLER,
+                "title": "Item from iMessage",
+                "market_value_cents": 30_000,
+                "sigma_cents": 3_500,
+                "floor_cents": 22_000,
+                "deadline_hours": 72,
+            },
+        ).json()["item_id"]
+        applied = client.post(
+            "/api/identify",
+            files={"upload": ("ipad.jpg", buffer.getvalue(), "image/jpeg")},
+            data={"caption": "", "item_id": item_id},
+        ).json()
+        assert applied["title_applied"] == IDENTITY.title
+        with Session(app.state.engine) as session:
+            item = session.get(Item, item_id)
+            assert item is not None and item.category == "tablet"
+            assert session.exec(select(LedgerEvent).where(LedgerEvent.action == "identify")).one()

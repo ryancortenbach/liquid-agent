@@ -245,15 +245,15 @@ def create_app(
             )
             app.state.owns_ebay_connections = True
         app.state.identifier = identifier
-        if app.state.identifier is None and app_settings.openai_api_key:
-            app.state.identifier = OpenAIIdentifier(
-                app_settings.openai_api_key,
-                model=app_settings.openai_vision_model,
-            )
-        elif app.state.identifier is None and app_settings.anthropic_api_key:
-            app.state.identifier = ClaudeIdentifier(
-                app_settings.anthropic_api_key, model=app_settings.claude_model
-            )
+        if app.state.identifier is None:
+            if app_settings.identifier_provider == "openai" and app_settings.openai_api_key:
+                app.state.identifier = OpenAIIdentifier(
+                    app_settings.openai_api_key, model=app_settings.openai_vision_model
+                )
+            elif app_settings.anthropic_api_key:
+                app.state.identifier = ClaudeIdentifier(
+                    app_settings.anthropic_api_key, model=app_settings.claude_model
+                )
         app.state.seller_router = None
         if app.state.message_adapter is not None and app_settings.seller_handle:
             app.state.seller_router = SellerMessageRouter(
@@ -571,6 +571,48 @@ def create_app(
         except EbayPublishError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
         return result.as_dict()
+
+    @app.post("/api/identify")
+    async def identify_photo(
+        request: Request,
+        upload: Annotated[UploadFile, File()],
+        caption: Annotated[str, Form()] = "",
+        item_id: Annotated[str | None, Form()] = None,
+        engine: EngineDep = None,  # type: ignore[assignment]
+    ) -> dict:
+        """Identify a product photo (and optionally apply the result to an item)."""
+        identifier: Identifier | None = request.app.state.identifier
+        if identifier is None:
+            raise HTTPException(status_code=503, detail="no identifier is configured")
+        content = await upload.read(MAX_PHOTO_BYTES + 1)
+        if not content:
+            raise HTTPException(status_code=422, detail="photo is empty")
+        identity = await identifier.identify(content, upload.content_type or "image/jpeg", caption)
+        payload = identity.model_dump() | {"question": identity.question()}
+        if item_id:
+            with Session(engine) as session:
+                item = session.get(Item, item_id)
+                if item is None:
+                    raise HTTPException(status_code=404, detail="item not found")
+                SellerMessageRouter._apply_identity(item, identity)
+                item.constraints_json = {**item.constraints_json, "identity_confirmed": False}
+                session.add(item)
+                write_decision(
+                    session,
+                    item_id=item.id,
+                    sim_at=request.app.state.clock.now(),
+                    wall_at=request.app.state.clock.wall(),
+                    kind="system",
+                    action="identify",
+                    inputs={"title": identity.title, "confidence": identity.confidence},
+                    reason="identified from the uploaded photo (API)",
+                    price_before=None,
+                    price_after=None,
+                )
+                session.commit()
+                payload["item_id"] = item.id
+                payload["title_applied"] = item.title
+        return payload
 
     @app.post("/api/items/{item_id}/details")
     def add_details(item_id: str, body: DetailsRequest, engine: EngineDep) -> dict:

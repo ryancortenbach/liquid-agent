@@ -31,10 +31,11 @@ class Settings(BaseSettings):
     handoff_dir: str = "data/handoff"
     reprice_loop: bool = False
     openai_api_key: str | None = None
-    openai_vision_model: str = "gpt-5.4-mini"
     openai_image_model: str = "gpt-image-2.5-sunburst"
     openai_image_quality: str = "high"
     openai_image_size: str = "1024x1024"
+    openai_vision_model: str = "gpt-5.4-mini"
+    identifier_provider: str = "openai"  # openai | claude
     bb_server_url: str = "http://localhost:1234"
     bb_password: str | None = None
     bb_webhook_secret: str | None = None

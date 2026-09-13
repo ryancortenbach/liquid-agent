@@ -63,6 +63,18 @@ def main() -> int:
 
         if args.photo:
             with args.photo.open("rb") as handle:
+                identity = step(
+                    "identify photo",
+                    client.post(
+                        "/api/identify",
+                        files={"upload": (args.photo.name, handle, "image/jpeg")},
+                        data={"caption": args.title, "item_id": item_id},
+                    ),
+                )
+            if identity.get("question"):
+                print("    " + identity["question"].replace("\n", "\n    "))
+                print("    (demo runner answers: yes)")
+            with args.photo.open("rb") as handle:
                 enhanced = step(
                     "enhance photo",
                     client.post(
