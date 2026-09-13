@@ -101,6 +101,18 @@ class EbayConnection(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=utc_now)
 
 
+class EmailConnection(SQLModel, table=True):
+    id: str = Field(default_factory=new_id, primary_key=True)
+    seller_id: str = Field(foreign_key="seller.id", index=True, unique=True)
+    provider: str = "gmail"
+    email_address: str = Field(index=True)
+    encrypted_refresh_token: str
+    scopes_json: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    connected_at: datetime = Field(default_factory=utc_now)
+    updated_at: datetime = Field(default_factory=utc_now)
+    last_checked_at: datetime = Field(default_factory=utc_now, index=True)
+
+
 class SellerConversation(SQLModel, table=True):
     id: str = Field(default_factory=new_id, primary_key=True)
     seller_id: str = Field(foreign_key="seller.id", index=True, unique=True)
@@ -280,6 +292,24 @@ class InboundFingerprint(SQLModel, table=True):
     fingerprint: str = Field(primary_key=True)
     event_id: str = Field(index=True)
     received_at: datetime = Field(default_factory=utc_now, index=True)
+
+
+class MarketplaceEmailEvent(SQLModel, table=True):
+    provider: str = Field(primary_key=True)
+    message_id: str = Field(primary_key=True)
+    seller_id: str = Field(foreign_key="seller.id", index=True)
+    marketplace: str
+    kind: str
+    sender: str
+    subject: str
+    amount_cents: int | None = Field(default=None, ge=0)
+    external_reference: str | None = None
+    matched_item_id: str | None = Field(default=None, foreign_key="item.id", index=True)
+    match_confidence: float = Field(default=0, ge=0, le=1)
+    source_authenticated: bool = False
+    status: str = "detected"
+    received_at: datetime = Field(default_factory=utc_now)
+    processed_at: datetime = Field(default_factory=utc_now)
 
 
 class DemandObs(SQLModel, table=True):

@@ -84,6 +84,12 @@ def sandbox_listing_url(listing_id: str) -> str:
     return f"https://www.sandbox.ebay.com/itm/{listing_id}"
 
 
+def ebay_listing_url(listing_id: str, environment: str) -> str:
+    if environment == "sandbox":
+        return sandbox_listing_url(listing_id)
+    return f"https://www.ebay.com/itm/{listing_id}"
+
+
 async def publish_item_to_ebay(
     *,
     engine: Engine,

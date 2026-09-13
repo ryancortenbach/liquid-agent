@@ -18,6 +18,7 @@ DIRECT_TEXT = {
     "cancel",
     "status",
     "connect ebay",
+    "connect email",
 }
 INTENT_TEXT = {
     ChatIntent.STATUS: "status",
@@ -26,6 +27,7 @@ INTENT_TEXT = {
     ChatIntent.BACK: "back",
     ChatIntent.START_OVER: "start over",
     ChatIntent.CONNECT_EBAY: "connect ebay",
+    ChatIntent.CONNECT_EMAIL: "connect email",
     ChatIntent.APPROVE: "approve",
     ChatIntent.REJECT: "reject",
     ChatIntent.PUBLISH: "go",
@@ -100,7 +102,11 @@ class PipelineRouter:
             message = replace(message, text=normalized)
         if not message.attachments and await self.base.handle_control(message):
             return
-        if not message.attachments and message.text.strip().lower() in {"connect ebay", "status"}:
+        if not message.attachments and message.text.strip().lower() in {
+            "connect ebay",
+            "connect email",
+            "status",
+        }:
             await self.base.route(message)
             return
         if not message.attachments and await self.flow.handle(message):

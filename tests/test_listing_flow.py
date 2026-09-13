@@ -90,6 +90,21 @@ class FakeEbayPublisher:
         return None
 
 
+class FakeGmailConnections:
+    def __init__(self) -> None:
+        self.alerts: list[tuple[str, str, str]] = []
+
+    def authorization_url(self, seller_id: str) -> str:
+        return f"https://google.example.com/connect?state={seller_id}"
+
+    async def send_alert(self, seller_id: str, subject: str, text: str) -> bool:
+        self.alerts.append((seller_id, subject, text))
+        return True
+
+    async def poll_once(self) -> int:
+        return 0
+
+
 def make_settings(tmp_path: Path, **overrides) -> Settings:
     base = dict(
         mode=Mode.SIM,
@@ -113,6 +128,20 @@ def send(client: TestClient, guid: str, text: str, *, with_photo: bool = False) 
         json=payload(guid, text, with_photo=with_photo),
     )
     assert response.json()["status"] == "queued", response.json()
+
+
+def test_connect_email_command_sends_seller_oauth_link(tmp_path: Path) -> None:
+    adapter = FakeMessageAdapter()
+    gmail = FakeGmailConnections()
+    app = create_app(
+        make_settings(tmp_path),
+        message_adapter=adapter,
+        gmail_connection_service=gmail,  # type: ignore[arg-type]
+    )
+    with TestClient(app) as client:
+        send(client, "email-1", "connect email")
+    assert "https://google.example.com/connect?state=" in adapter.sent_texts[-1]
+    assert "read-only inbox access" in adapter.sent_texts[-1]
 
 
 def test_imessage_onboarding_to_listing_pack_without_ebay_sandbox(tmp_path: Path) -> None:
@@ -183,6 +212,7 @@ def test_imessage_onboarding_to_listing_pack_without_ebay_sandbox(tmp_path: Path
 def test_go_publishes_to_ebay_sandbox_when_configured(tmp_path: Path) -> None:
     adapter = FakeMessageAdapter()
     publisher = FakeEbayPublisher()
+    gmail = FakeGmailConnections()
     settings = make_settings(
         tmp_path,
         public_base_url="https://demo.example.com",
@@ -193,7 +223,11 @@ def test_go_publishes_to_ebay_sandbox_when_configured(tmp_path: Path) -> None:
         ebay_sb_default_category_id="171485",
     )
     app = create_app(
-        settings, photo_editor=FakePhotoEditor(), message_adapter=adapter, ebay_publisher=publisher
+        settings,
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+        ebay_publisher=publisher,
+        gmail_connection_service=gmail,  # type: ignore[arg-type]
     )
     with TestClient(app) as client:
         send(client, "m1", "Sony WH-1000XM5 headphones", with_photo=True)
@@ -202,9 +236,11 @@ def test_go_publishes_to_ebay_sandbox_when_configured(tmp_path: Path) -> None:
         send(client, "m4", "week, you decide, ship, ebay only")
         assert adapter.sent_texts[-1].startswith("here's the plan")
         send(client, "m5", "go")
-        assert "listed on ebay (sandbox): https://www.sandbox.ebay.com/itm/1100001" in (
-            adapter.sent_texts[-1]
+        assert (
+            "listed on ebay (sandbox): https://www.sandbox.ebay.com/itm/1100001"
+            in (adapter.sent_texts[-1])
         )
+        assert gmail.alerts and "https://www.sandbox.ebay.com/itm/1100001" in gmail.alerts[0][2]
         assert publisher.offers and publisher.offers[0].condition == "USED_EXCELLENT"
         assert publisher.offers[0].image_urls[0].startswith("https://demo.example.com/api/photos/")
         with Session(app.state.engine) as session:
@@ -261,8 +297,7 @@ def test_publishing_advances_to_next_batch_item(tmp_path: Path) -> None:
 
         send(client, "b5", "go")
         assert any(
-            "Next is item 2 of 2: Bose QC45 headphones" in text
-            for text in adapter.sent_texts
+            "Next is item 2 of 2: Bose QC45 headphones" in text for text in adapter.sent_texts
         )
         assert adapter.sent_texts[-1].startswith("two quick things")
         with Session(app.state.engine) as session:
@@ -291,7 +326,9 @@ def test_api_path_plans_and_publishes_without_imessage(tmp_path: Path) -> None:
             f"/api/items/{item_id}/details", json={"text": "good, box included, 3 days, all"}
         ).json()
         assert details["horizon"] == "3 days" and details["platforms"] == [
-            "ebay", "facebook", "offerup",
+            "ebay",
+            "facebook",
+            "offerup",
         ]
         plan = client.post(f"/api/items/{item_id}/plan-listing", json={"research": True}).json()
         assert plan["card_text"].startswith("here's the plan")

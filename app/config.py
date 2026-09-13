@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     shippo_api_key: str | None = None
     google_oauth_client_json: str = "./secrets/gcal_client.json"
     google_token_json: str = "./secrets/gcal_token.json"
+    gmail_oauth_client_json: str = "./secrets/gmail_client.json"
+    gmail_oauth_redirect_uri: str | None = None
+    gmail_poll_enabled: bool = True
+    gmail_poll_seconds: float = Field(default=60, ge=15)
     seller_from_address_json: str | None = None
 
     @field_validator("tz")

@@ -30,6 +30,7 @@ from app.models import (
     ConversationStatus,
     ConversationTurn,
     EbayConnection,
+    EmailConnection,
     Item,
     ItemStatus,
     PhotoRole,
@@ -165,6 +166,7 @@ class SellerMessageRouter:
         seller_handle: str,
         timezone: str,
         ebay_authorization_url: Callable[[str], str] | None = None,
+        email_authorization_url: Callable[[str], str] | None = None,
         require_ebay_onboarding: bool = True,
         identifier: Identifier | None = None,
         reviewer: PhotoTruthReviewer | None = None,
@@ -179,6 +181,7 @@ class SellerMessageRouter:
         )
         self.timezone = timezone
         self.ebay_authorization_url = ebay_authorization_url
+        self.email_authorization_url = email_authorization_url
         self.require_ebay_onboarding = require_ebay_onboarding
         self.identifier = identifier
         self.reviewer = reviewer
@@ -200,9 +203,7 @@ class SellerMessageRouter:
             conversation = self._get_or_create_conversation(session, message)
             source_event_id = message.guid if role == "user" else f"{message.guid}:{role}"
             existing = session.exec(
-                select(ConversationTurn).where(
-                    ConversationTurn.source_event_id == source_event_id
-                )
+                select(ConversationTurn).where(ConversationTurn.source_event_id == source_event_id)
             ).first()
             if existing is not None:
                 return
@@ -263,6 +264,9 @@ class SellerMessageRouter:
         lowered = message.text.strip().lower()
         if lowered == "connect ebay":
             await self._connect_ebay(message)
+            return
+        if lowered == "connect email":
+            await self._connect_email(message)
             return
         if not message.attachments and await self._confirm_identity(message):
             return
@@ -362,7 +366,8 @@ class SellerMessageRouter:
         if lowered in HELP_WORDS:
             response = (
                 "Commands: STATUS shows progress. RESUME repeats the next step. BACK explains "
-                "how to revise the current step. START OVER cancels the current draft."
+                "how to revise the current step. START OVER cancels the current draft. "
+                "CONNECT EMAIL turns on offer, sale, and publish-link alerts."
             )
         elif lowered in START_OVER_WORDS:
             with Session(self.engine) as session:
@@ -444,6 +449,33 @@ class SellerMessageRouter:
             message.chat_guid,
             response,
             f"{message.guid}:connect-ebay",
+        )
+
+    async def _connect_email(self, message: InboundMessage) -> None:
+        with Session(self.engine) as session:
+            conversation = self._get_or_create_conversation(session, message)
+            seller_id = conversation.seller_id
+            connected = session.exec(
+                select(EmailConnection).where(EmailConnection.seller_id == seller_id)
+            ).first()
+            session.commit()
+        if connected is not None:
+            response = (
+                f"Email alerts are already connected to {connected.email_address}. I will watch "
+                "for marketplace offers and sales and email live listing links."
+            )
+        elif self.email_authorization_url is None:
+            response = "Gmail connection is not configured yet."
+        else:
+            response = (
+                "Open this secure Google link to connect Gmail for marketplace alerts. Liquid "
+                "requests read-only inbox access and permission to send alerts to you. "
+                f"The link expires in 10 minutes: {self.email_authorization_url(seller_id)}"
+            )
+        await self.adapter.send_text(
+            message.chat_guid,
+            response,
+            f"{message.guid}:connect-email",
         )
 
     def _get_or_create_conversation(
@@ -593,9 +625,9 @@ class SellerMessageRouter:
             )
             media = []
             for attachment, content in zip(attachments, downloaded, strict=True):
-                mime_type = attachment.mime_type or mimetypes.guess_type(
-                    attachment.filename or ""
-                )[0]
+                mime_type = (
+                    attachment.mime_type or mimetypes.guess_type(attachment.filename or "")[0]
+                )
                 if mime_type is None:
                     raise PhotoPipelineError("photo media type is missing")
                 media.append((attachment, content, mime_type))
@@ -729,9 +761,7 @@ class SellerMessageRouter:
                 self._apply_identity(item, identity)
                 if len(items) > 1:
                     crop = crop_inventory_item(content, identity.box_2d)
-                    pending = self.storage.save_original(
-                        f"_pending/{item.id}", crop, "image/jpeg"
-                    )
+                    pending = self.storage.save_original(f"_pending/{item.id}", crop, "image/jpeg")
                     pending_attachments = [
                         {"file_path": pending.relative_path, "mime_type": "image/jpeg"}
                     ]
@@ -773,8 +803,7 @@ class SellerMessageRouter:
             question = identities[0].question()
         else:
             summary = "\n".join(
-                f"{index}. {identity.title}"
-                for index, identity in enumerate(identities, start=1)
+                f"{index}. {identity.title}" for index, identity in enumerate(identities, start=1)
             )
             question = (
                 f"I found {len(identities)} sellable items in that photo:\n{summary}\n"
@@ -883,8 +912,7 @@ class SellerMessageRouter:
                     repeat_text = f"Updated.\n{summary}\nReply YES if all are right."
                 else:
                     repeat_text = (
-                        "Reply YES if every item is right, or correct one like "
-                        "'2 is Bose QC45'."
+                        "Reply YES if every item is right, or correct one like '2 is Bose QC45'."
                     )
             elif len(batch_items) == 1:
                 identity = ItemIdentity.model_validate(item.constraints_json.get("identity") or {})
@@ -948,9 +976,7 @@ class SellerMessageRouter:
 
         try:
             flattened = [
-                (item_id, pending)
-                for item_id, values in pending_by_item
-                for pending in values
+                (item_id, pending) for item_id, values in pending_by_item for pending in values
             ]
             contents = await asyncio.gather(
                 *(self._load_pending_attachment(value) for _, value in flattened)
@@ -1217,8 +1243,7 @@ class SellerMessageRouter:
                 if item is None:
                     return "No active item. Send a product photo to start."
                 response = (
-                    f"{item.title}: {item.status.value}. "
-                    f"Current step: {conversation.status.value}."
+                    f"{item.title}: {item.status.value}. Current step: {conversation.status.value}."
                 )
                 if include_next_step:
                     next_steps = {

@@ -117,6 +117,21 @@ async def run(live: bool) -> int:
         )
     )
 
+    gmail_ready = (
+        Path(settings.gmail_oauth_client_json).exists()
+        and configured(settings.app_secret)
+        and settings.public_base_url.startswith("https://")
+    )
+    results.append(
+        (
+            "Gmail seller alerts",
+            "READY" if gmail_ready else "MISSING",
+            "OAuth client, app secret, and HTTPS callback present"
+            if gmail_ready
+            else "GMAIL_OAUTH_CLIENT_JSON, APP_SECRET, public HTTPS PUBLIC_BASE_URL",
+        )
+    )
+
     widths = [max(len(row[index]) for row in results) for index in range(3)]
     for name, status, detail in results:
         print(f"{name:<{widths[0]}}  {status:<{widths[1]}}  {detail:<{widths[2]}}")

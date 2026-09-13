@@ -66,6 +66,21 @@ Each adapter normalizes supported signals into views, saves, inquiries, offers, 
 orders, cancellations, and seller-confirmed local sales. Unsupported signals can be entered by the
 seller with a short message such as `facebook offer 187` or `sold on marketplace for 198`.
 
+## Seller email alerts
+
+Each seller can reply `CONNECT EMAIL` in iMessage after eBay onboarding. Liquid uses a signed,
+10-minute Google OAuth link and stores only that seller's encrypted Gmail refresh token. It polls
+for new eBay and Facebook Marketplace notifications, deduplicates by Gmail message id, and parses
+offer and sold events. Known sender domains plus passing Gmail authentication results are required
+before an event changes marketplace state. An uncertain sender, amount, or item match produces a
+review alert instead of changing the item.
+
+Authenticated offers are added to the deterministic offer engine. An authenticated sold message
+that matches a listing id or item title marks the item sold and ends its other active listings.
+Every detected event is stored without retaining the full email body. Alerts go to iMessage and
+the connected Gmail address. After eBay returns a live listing id, Liquid sends the exact listing
+URL through both channels.
+
 ## Claude
 
 Structured model calls provide item identity, condition notes, seller intent, comps filtering,

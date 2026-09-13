@@ -6,6 +6,7 @@ import secrets
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import timedelta
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import (
@@ -42,6 +43,7 @@ from app.intake.flow import ListingFlow, pack_dict
 from app.intake.router import PipelineRouter
 from app.ledger import write_decision
 from app.listing.draft import polish_with_claude
+from app.mail.gmail import GmailConnectionService, GmailError, GmailOAuthClient, gmail_poll_loop
 from app.market import publish_service
 from app.market.ebay import (
     EbayError,
@@ -196,6 +198,7 @@ def create_app(
     message_adapter: BlueBubblesAdapter | None = None,
     ebay_publisher: EbayPublisher | None = None,
     ebay_connection_service: EbayConnectionService | None = None,
+    gmail_connection_service: GmailConnectionService | None = None,
     chat_interpreter: ChatInterpreter | None = None,
     identifier: Identifier | None = None,
     photo_reviewer: PhotoTruthReviewer | None = None,
@@ -267,6 +270,29 @@ def create_app(
                 app_secret=app_settings.app_secret or "",
             )
             app.state.owns_ebay_connections = True
+        app.state.gmail_connections = gmail_connection_service
+        app.state.owns_gmail_connections = False
+        gmail_redirect_uri = app_settings.gmail_oauth_redirect_uri or (
+            f"{app_settings.public_base_url.rstrip('/')}/oauth/google/gmail/callback"
+        )
+        if (
+            app.state.gmail_connections is None
+            and app_settings.app_secret
+            and Path(app_settings.gmail_oauth_client_json).is_file()
+        ):
+            try:
+                app.state.gmail_connections = GmailConnectionService(
+                    engine=app.state.engine,
+                    oauth=GmailOAuthClient(
+                        app_settings.gmail_oauth_client_json,
+                        gmail_redirect_uri,
+                    ),
+                    app_secret=app_settings.app_secret,
+                    adapter=app.state.message_adapter,
+                )
+                app.state.owns_gmail_connections = True
+            except (GmailError, ValueError) as exc:
+                log.warning("Gmail connection is disabled: %s", exc)
         app.state.identifier = identifier
         if app.state.identifier is None:
             if app_settings.identifier_provider == "openai" and app_settings.openai_api_key:
@@ -300,6 +326,11 @@ def create_app(
                 ebay_authorization_url=(
                     app.state.ebay_connections.authorization_url
                     if app.state.ebay_connections is not None
+                    else None
+                ),
+                email_authorization_url=(
+                    app.state.gmail_connections.authorization_url
+                    if app.state.gmail_connections is not None
                     else None
                 ),
                 require_ebay_onboarding=app_settings.require_ebay_onboarding,
@@ -357,6 +388,11 @@ def create_app(
             polish=polish,
             ebay_taxonomy=app.state.ebay_taxonomy,
             photo_storage=app.state.photo_storage,
+            email_notifier=(
+                app.state.gmail_connections.send_alert
+                if app.state.gmail_connections is not None
+                else None
+            ),
         )
         if app.state.seller_router is not None:
             app.state.seller_router = PipelineRouter(
@@ -378,7 +414,20 @@ def create_app(
                     stop=app.state.reprice_stop,
                 )
             )
+        app.state.gmail_poll_stop = asyncio.Event()
+        app.state.gmail_poll_task = None
+        if app_settings.gmail_poll_enabled and app.state.gmail_connections is not None:
+            app.state.gmail_poll_task = asyncio.create_task(
+                gmail_poll_loop(
+                    app.state.gmail_connections,
+                    interval_seconds=app_settings.gmail_poll_seconds,
+                    stop=app.state.gmail_poll_stop,
+                )
+            )
         yield
+        app.state.gmail_poll_stop.set()
+        if app.state.gmail_poll_task is not None:
+            await app.state.gmail_poll_task
         app.state.reprice_stop.set()
         if app.state.reprice_task is not None:
             await app.state.reprice_task
@@ -388,6 +437,8 @@ def create_app(
             await app.state.ebay_publisher.close()
         if app.state.owns_ebay_connections and app.state.ebay_connections is not None:
             await app.state.ebay_connections.close()
+        if app.state.owns_gmail_connections and app.state.gmail_connections is not None:
+            await app.state.gmail_connections.close()
         if getattr(app.state, "ebay_taxonomy", None) is not None:
             await app.state.ebay_taxonomy.close()
 
@@ -475,11 +526,57 @@ def create_app(
         if adapter is not None and chat_guid is not None:
             await adapter.send_text(
                 chat_guid,
-                "eBay connected. Setup is complete. Send one or more product photos to start.",
+                (
+                    "eBay connected. Setup is complete. Send one or more product photos to start, "
+                    "or reply CONNECT EMAIL to add offer, sale, and listing-link alerts."
+                ),
                 f"ebay-connected:{connection.id}:{connection.updated_at.isoformat()}",
             )
         return HTMLResponse(
             "<h1>eBay connected</h1><p>You can close this page and return to Messages.</p>"
+        )
+
+    @app.get("/oauth/google/gmail/callback", response_class=HTMLResponse)
+    async def gmail_oauth_callback(
+        request: Request,
+        state: str | None = None,
+        code: str | None = None,
+        error: str | None = None,
+    ) -> HTMLResponse:
+        service: GmailConnectionService | None = request.app.state.gmail_connections
+        if service is None:
+            raise HTTPException(status_code=503, detail="Gmail OAuth is not configured")
+        if error or not state or not code:
+            return HTMLResponse(
+                "<h1>Gmail was not connected</h1>"
+                "<p>Return to Messages and reply CONNECT EMAIL for a fresh link.</p>",
+                status_code=400,
+            )
+        try:
+            seller_id = service.seller_id_for_state(state)
+            connection = await service.complete(state, code)
+        except (ValueError, GmailError):
+            return HTMLResponse(
+                "<h1>Gmail connection failed</h1>"
+                "<p>Return to Messages and reply CONNECT EMAIL for a fresh link.</p>",
+                status_code=400,
+            )
+        adapter: BlueBubblesAdapter | None = request.app.state.message_adapter
+        with Session(request.app.state.engine) as session:
+            conversation = session.exec(
+                select(SellerConversation).where(SellerConversation.seller_id == seller_id)
+            ).first()
+        if adapter is not None and conversation is not None:
+            await adapter.send_text(
+                conversation.chat_guid,
+                (
+                    f"Gmail connected to {connection.email_address}. I will alert you here and "
+                    "by email when I detect an offer or sale, and I will email live listing links."
+                ),
+                f"gmail-connected:{connection.id}:{connection.updated_at.isoformat()}",
+            )
+        return HTMLResponse(
+            "<h1>Gmail connected</h1><p>You can close this page and return to Messages.</p>"
         )
 
     async def process_bluebubbles_message(message) -> None:

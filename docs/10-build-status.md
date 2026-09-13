@@ -23,23 +23,29 @@ Updated 2026-09-13.
 - Seller recovery commands for status, resume, back, help, and safe draft reset
 - eBay sandbox inventory, reusable offer draft, and seller-approved publication flow
 - SQLite sale claims that pause duplicates and support confirmed or failed marketplace closes
+- Per-seller Gmail OAuth with encrypted refresh tokens and signed, expiring connection links
+- Authenticated eBay and Facebook email parsing with message deduplication and safe item matching
+- Offer and sold alerts fanned out once through both Gmail and iMessage
+- Live eBay listing URLs returned through iMessage and email only after publication succeeds
 - Deadline pricing engine, guard, ledger, outbox, simulation, and evaluation artifacts
 - FastAPI item, photo enhancement, photo review, file, planning, tick, and ledger endpoints
-- 106 passing unit, API, property, clock, simulation, sale-claim, photo, iMessage, and eBay tests
+- 112 passing unit, API, property, clock, simulation, sale-claim, photo, iMessage, email, and eBay tests
 
 ## Ordered P0 queue
 
 1. Complete a live BlueBubbles and OpenAI smoke test after credentials are configured.
 2. Run `uv run python scripts/ebay_verify.py --publish` once sandbox keys land; policy and location setup is scripted (`scripts/ebay_setup.py`).
-3. Build the assisted Facebook Marketplace publication flow.
-4. Add the outbox delivery worker and restart tests.
-5. Build the demo dashboard and recorded scenario.
+3. Configure the Gmail OAuth web client and run one connected-inbox smoke test.
+4. Build the assisted Facebook Marketplace publication flow.
+5. Add the outbox delivery worker and restart tests.
+6. Build the demo dashboard and recorded scenario.
 
 ## Local setup blockers
 
 - `OPENAI_API_KEY` is required for a live photo edit.
 - BlueBubbles needs manual installation and macOS permissions.
 - eBay sandbox keys and seller authorization are required for a live sandbox listing.
+- Gmail OAuth client JSON and seller consent are required for email detection and alerts.
 - Google Calendar OAuth is optional and not yet configured.
 
 These do not block local tests or development with a fake photo editor.

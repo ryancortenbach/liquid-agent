@@ -116,12 +116,33 @@ offer.
 2. Test opening the Marketplace create-listing flow.
 3. Liquid may prepare and fill fields, but the seller performs the final review and publication.
 
-## 6. Optional fulfillment and calendar
+## 6. Gmail offer, sale, and listing-link alerts
+
+1. In Google Cloud, enable the Gmail API and configure the OAuth consent screen.
+2. Create a Web application OAuth client. Add
+   `{PUBLIC_BASE_URL}/oauth/google/gmail/callback` as an authorized redirect URI.
+3. Download the client JSON to `secrets/gmail_client.json`. Never commit it.
+4. Set `APP_SECRET` to at least 32 random characters. Use the same value across restarts because
+   it encrypts seller refresh tokens.
+5. Set `GMAIL_OAUTH_REDIRECT_URI` only when it differs from the URL above. Keep
+   `GMAIL_POLL_ENABLED=true` and choose a polling interval of at least 15 seconds.
+6. Restart Liquid. After eBay onboarding, text `CONNECT EMAIL`, open the returned Google link,
+   and approve Gmail read-only and send access.
+
+The read-only Gmail scope is restricted. Test users can use it during development, but a public
+rollout needs Google's OAuth verification and may need a security assessment. Liquid stores only
+the encrypted refresh token and parsed marketplace event metadata, not complete message bodies.
+
+After connection, authenticated eBay and Facebook Marketplace offer or sold notifications produce
+one alert in both Gmail and iMessage. A successful eBay publish also sends the returned live URL
+through both channels.
+
+## 7. Optional fulfillment and calendar
 
 - Add a Shippo test key only for sales where the marketplace does not supply a label.
 - Enable Google Calendar API and place the OAuth client at `secrets/gcal_client.json`.
 
-## 7. Readiness check
+## 8. Readiness check
 
 ```bash
 uv run python scripts/smoke_all.py

@@ -99,6 +99,13 @@ seller messages to understand conversational requests and references. The determ
 still owns onboarding, photo approval, listing approval, and publishing. Each seller's messages are
 processed serially so delayed BlueBubbles deliveries cannot trigger duplicate replies.
 
+After eBay onboarding, reply `CONNECT EMAIL` to connect the seller's Gmail account. Liquid watches
+authenticated eBay and Facebook Marketplace mail for offers and sold events, deduplicates messages,
+and matches them to the seller's listings. Safe matches update the offer or sale state. Ambiguous
+messages ask for review. Alerts arrive through both Gmail and iMessage, and every successful eBay
+publication includes the returned live listing URL in both channels. Gmail setup and public OAuth
+verification requirements are in `docs/08-setup.md`.
+
 For per-seller OAuth, configure the eBay application credentials, RuName, `APP_SECRET`, and a
 public `PUBLIC_BASE_URL`. Every seller is placed into eBay onboarding on their first text, and
 Liquid processes nothing until they approve access. Liquid stores only an encrypted refresh token

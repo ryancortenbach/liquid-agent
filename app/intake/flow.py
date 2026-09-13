@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -25,7 +25,7 @@ from app.listing.handoff import build_handoffs, dollars
 from app.listing.pack import replace_draft_packs
 from app.market.ebay import EbayPublisher
 from app.market.ebay_taxonomy import EbayTaxonomyClient
-from app.market.publish_service import EbayPublishError, publish_item_to_ebay, sandbox_listing_url
+from app.market.publish_service import EbayPublishError, ebay_listing_url, publish_item_to_ebay
 from app.models import (
     ConversationStatus,
     Item,
@@ -45,7 +45,15 @@ from app.research.sources import CompsSource
 log = logging.getLogger(__name__)
 
 GO_WORDS = {
-    "go", "publish", "list it", "post it", "do it", "go ahead", "ok go", "yes go", "ship it",
+    "go",
+    "publish",
+    "list it",
+    "post it",
+    "do it",
+    "go ahead",
+    "ok go",
+    "yes go",
+    "ship it",
 }
 CANCEL_WORDS = {"cancel", "stop", "never mind", "nevermind"}
 FLOW_STATES = {
@@ -107,6 +115,7 @@ class ListingFlow:
         polish: Callable[[ListingDraft], ListingDraft] | None = None,
         ebay_taxonomy: EbayTaxonomyClient | None = None,
         photo_storage: PhotoStorage | None = None,
+        email_notifier: Callable[[str, str, str], Awaitable[bool]] | None = None,
     ) -> None:
         self.engine = engine
         self.clock = clock
@@ -118,6 +127,7 @@ class ListingFlow:
         self.polish = polish
         self.ebay_taxonomy = ebay_taxonomy
         self.photo_storage = photo_storage
+        self.email_notifier = email_notifier
 
     # ---------- storage helpers ----------
     def _load(self, session: Session, handle: str) -> tuple[SellerConversation | None, Item | None]:
@@ -437,6 +447,7 @@ class ListingFlow:
             item = session.get(Item, item_id)
             if item is None:
                 raise LookupError("item not found")
+            seller_id = item.seller_id
             details = apply_defaults(self._details(item))
             packs = session.exec(
                 select(ListingPack).where(
@@ -461,6 +472,7 @@ class ListingFlow:
 
         outcomes: dict[str, dict[str, Any]] = {}
         messages: list[str] = []
+        published_links: list[str] = []
         ebay_live = False
         for pack_id in pack_ids:
             with Session(self.engine) as session:
@@ -492,7 +504,9 @@ class ListingFlow:
                         photo_storage=self.photo_storage,
                     )
                     listing_url = (
-                        sandbox_listing_url(result.listing_id) if result.listing_id else None
+                        ebay_listing_url(result.listing_id, self.settings.ebay_environment)
+                        if result.listing_id
+                        else None
                     )
                     with Session(self.engine) as session:
                         pack = session.get(ListingPack, pack_id)
@@ -505,8 +519,17 @@ class ListingFlow:
                         session.add(pack)
                         session.commit()
                     ebay_live = True
-                    outcomes["ebay"] = {"status": "live", "listing_id": result.listing_id}
-                    messages.append(f"listed on ebay (sandbox): {listing_url}")
+                    outcomes["ebay"] = {
+                        "status": "live",
+                        "listing_id": result.listing_id,
+                        "url": listing_url,
+                    }
+                    environment_label = (
+                        " (sandbox)" if self.settings.ebay_environment == "sandbox" else ""
+                    )
+                    messages.append(f"listed on ebay{environment_label}: {listing_url}")
+                    if listing_url:
+                        published_links.append(listing_url)
                 except EbayPublishError as exc:
                     with Session(self.engine) as session:
                         pack = session.get(ListingPack, pack_id)
@@ -583,6 +606,12 @@ class ListingFlow:
             session.commit()
         if any(value["status"] == "handoff_ready" for value in outcomes.values()):
             messages.append("for facebook and offerup, paste the messages above into the apps.")
+        if published_links and self.email_notifier is not None:
+            email_text = "Your listing is live:\n" + "\n".join(published_links)
+            try:
+                await self.email_notifier(seller_id, "Your Liquid listing is live", email_text)
+            except Exception as exc:
+                log.warning("Could not email published listing link: %s", exc)
         if messages:
             await self._send(chat_guid, "\n".join(messages), f"{key}:published")
         if next_batch is not None:
