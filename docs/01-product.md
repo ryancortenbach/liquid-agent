@@ -4,7 +4,7 @@ Name: **Liquid**. As in liquidity, turning possessions into cash on a timeline.
 
 ## One line
 
-Take a picture. Set a deadline. Get it listed everywhere it can sell.
+Take a picture. Set a deadline. Liquid prices and coordinates the sale to turn it into cash in time.
 
 ## Product boundary
 

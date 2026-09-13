@@ -1,6 +1,6 @@
 # Liquid
 
-**Take a picture. Set a deadline. Get it listed everywhere it can sell.**
+**Take a picture. Set a deadline. Liquid prices and coordinates the sale to turn it into cash in time.**
 
 Entry for the [Multi-App AI Agent Hackathon](https://multiappagenthackathon.com), September 13, 2026.
 Team: Ryan Cortenbach ([@ryancortenbach](https://github.com/ryancortenbach)) and Tensae L
@@ -8,15 +8,43 @@ Team: Ryan Cortenbach ([@ryancortenbach](https://github.com/ryancortenbach)) and
 
 ## 01 Project overview
 
-Liquid is a seller-only agent that lives in iMessage. You text it a photo of something you want
-gone and a sentence like "sell by Sunday, not under 220"; it identifies the item, produces a
-truthful cleaned-up listing photo you approve, asks two short questions, pulls sold and active
-eBay comps, prices for your deadline, writes the listing, publishes to eBay on "go", hands you
-copy-ready posts for Facebook Marketplace and OfferUp, then steps the price down on its own
-schedule and tells you when it does. The problem it solves: listing well takes an hour of
-photography, research, and copywriting that most people skip, so their stuff sits unsold or
-sells cheap. Running cost is about $0.35 per listing (one image edit, two vision and chat calls,
-two comps scrapes, all at list prices).
+A deadline-native liquidity agent, not a listing generator: the same photo gets a different
+pricing policy at 12h, 24h, 72h, and 168h.
+
+Text Liquid a photo and a deadline over iMessage. A deterministic pricing engine, no LLM in the
+loop, prices for the hours left and coordinates price, markdown timing, and channel handoffs.
+Same agent, same seeded market, three item archetypes, four deadlines, 12,000 simulated policy
+runs. Expected net proceeds:
+
+| Deadline | Agent | Best baseline | Oracle | Agent sale rate |
+|---:|---:|---:|---:|---:|
+| 12h | $212 | $156 | $232 | 70% |
+| 24h | $226 | $199 | $254 | 89% |
+| 72h | $245 | $225 | $280 | 97% |
+| 168h | $260 | $225 | $296 | 99% |
+
+Baselines: static list, static 90 percent, linear markdown. Zero invariant violations at every
+horizon. At 12h the agent beats the best baseline by $56, at 168h by $35. That shift with the
+clock is the product.
+
+The channels are where liquidity lives, not the product:
+
+- Identification, eBay comps, and a truthful listing photo you approve
+- eBay publish on your explicit go (sandbox, demo mode today, keys pending)
+- Copy-ready Facebook Marketplace and OfferUp posts
+
+The problem it solves: listing well takes an hour of photography, research, and copywriting that
+most people skip, so their stuff sits unsold or sells cheap. Running cost is about $0.35 per
+listing (one image edit, two vision and chat calls, two comps scrapes, all at list prices).
+
+### Why the deadline is the product
+
+A listing generator picks one price and waits. Liquid treats the deadline as the input that sets
+the price: market value and spread from comps or a price prior, a demand model, expected-value
+ranking of candidate prices, and a markdown schedule at 66, 33, and 12 percent of the horizon.
+Every price action passes one guarded path: never below your floor without approval, never up
+without a replan, never accepted after the deadline, never published without an explicit go.
+Each has a test, 172 in all.
 
 **What is real today and what is not**
 
@@ -141,9 +169,9 @@ latency or delayed settlement.
 
 ## 05 Demo video
 
-Two minutes, both of us on camera, then the product. Under 100 MB so it lives in the repo:
+Two minutes, both of us on camera, then the product:
 
-**[demo/video/liquid-demo.mp4](demo/video/liquid-demo.mp4)** (click, then press play on the GitHub page)
+**[Watch the demo (Google Drive, public link)](https://drive.google.com/file/d/17kkeILEY67zHDHOedkJkdoUHAY7a1yNc/view?usp=sharing)**
 
 ---
 
