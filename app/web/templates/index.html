@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Liquid · items{% endblock %}
+{% block content %}
+<div class="panel"><h2>Items</h2>
+<table><tr><th>Item</th><th>Status</th><th>Conversation</th><th class="num">Market</th><th class="num">Floor</th><th>Packs</th></tr>
+{% for row in rows %}
+<tr>
+  <td><a href="/dashboard/{{ row.item.id }}">{{ row.item.title }}</a></td>
+  <td>{{ row.item.status.value }}</td>
+  <td>{{ row.conversation.status.value if row.conversation else "api" }}</td>
+  <td class="num">{{ row.item.market_value_cents | dollars }}</td>
+  <td class="num">{{ row.item.floor_cents | dollars }}</td>
+  <td>{% for pack in row.packs %}{{ pack.channel }}<span class="badge {{ pack.status.value }}">{{ pack.status.value }}</span> {% endfor %}</td>
+</tr>
+{% else %}<tr><td colspan="6">No items yet. Text a photo to the agent.</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

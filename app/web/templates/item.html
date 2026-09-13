@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Liquid · {{ item.title }}{% endblock %}
+{% block crumb %}· {{ item.title }}{% endblock %}
+{% block content %}
+<div class="grid">
+<div>
+  <div class="panel"><h2>Item</h2>
+    <div class="big">{{ item.market_value_cents | dollars }} <span class="badge">{{ item.status.value }}</span></div>
+    <table>
+      <tr><td>Condition</td><td>{{ item.condition.value }}{% if intake.condition %} ({{ intake.condition }}){% endif %}</td></tr>
+      <tr><td>Floor</td><td class="num">{{ item.floor_cents | dollars }} <span class="badge">{{ item.floor_source }}</span></td></tr>
+      <tr><td>Deadline</td><td class="num">{{ item.deadline_at.strftime("%a %H:%M") }} · {{ "%.0f" | format(hours_left) }}h left</td></tr>
+      <tr><td>Horizon</td><td>{{ intake.horizon or "" }} · {{ (intake.platforms or []) | join(", ") }}</td></tr>
+      <tr><td>Seller notes</td><td>{{ (intake.included or []) | join(", ") }}{% if intake.issues %} · issues: {{ intake.issues | join("; ") }}{% endif %}</td></tr>
+      <tr><td>Conversation</td><td>{{ conversation.status.value if conversation else "api" }}</td></tr>
+    </table>
+  </div>
+  <div class="panel"><h2>Photos</h2>
+    <div class="photos">
+      {% for photo in originals %}<figure><img src="/api/photos/{{ photo.id }}/file" alt="original"><figcaption>original · untouched</figcaption></figure>{% endfor %}
+      {% for photo in enhanced %}<figure>{% if photo.status.value in ("review","approved") %}<img src="/api/photos/{{ photo.id }}/file" alt="enhanced">{% endif %}<figcaption>enhanced <span class="badge {{ photo.status.value }}">{{ photo.status.value }}</span></figcaption></figure>{% endfor %}
+    </div>
+  </div>
+  {% if card %}<div class="panel"><h2>Plan card (as texted)</h2><pre class="card">{{ card }}</pre></div>{% endif %}
+  <div class="panel"><h2>Packs</h2>
+    <table><tr><th>Channel</th><th class="num">Price</th><th>Status</th><th>Where</th></tr>
+    {% for pack in packs %}<tr><td>{{ pack.channel }}</td><td class="num">{{ pack.price_cents | dollars }}</td>
+      <td><span class="badge {{ pack.status.value }}">{{ pack.status.value }}</span>{% if pack.failure_reason %} {{ pack.failure_reason }}{% endif %}</td>
+      <td>{% if pack.external_url %}<a href="{{ pack.external_url }}">{{ pack.external_id }}</a>{% elif pack.handoff_path %}{{ pack.handoff_path }}{% endif %}</td></tr>
+    {% else %}<tr><td colspan="4">No packs yet.</td></tr>{% endfor %}</table>
+  </div>
+  {% if research %}<div class="panel"><h2>Research</h2>
+    <table>
+      <tr><td>Query</td><td>{{ research.query }}</td></tr>
+      <tr><td>Sold</td><td class="num">{{ research.sold_n }} · median {{ research.sold_median_cents | dollars }}</td></tr>
+      <tr><td>Active</td><td class="num">{{ research.active_n }} · median {{ research.active_median_cents | dollars }}</td></tr>
+      <tr><td>Basis</td><td>{{ research.basis }}{% if research.sources_json and research.sources_json[0].source == "fixture" %} <span class="badge">offline sample</span>{% endif %}</td></tr>
+    </table>
+    <table><tr><th>Source</th><th class="num">Price</th><th>Kind</th></tr>
+    {% for source in research.sources_json %}<tr><td><a href="{{ source.url }}">{{ source.title }}</a></td><td class="num">{{ source.price_cents | dollars }}</td><td>{{ source.kind }} · {{ source.source }}</td></tr>{% endfor %}
+    </table>
+  </div>{% endif %}
+</div>
+<div>
+  <div class="panel ledger"><h2>Ledger · newest first</h2>
+    <table><tr><th class="num">Sim</th><th>Action</th><th>Reason</th><th class="num">Price</th></tr>
+    {% for row in ledger %}<tr>
+      <td class="num">{{ row.sim_at.strftime("%a %H:%M") }}<div class="kind">{{ row.kind }}</div></td>
+      <td>{{ row.action }}</td>
+      <td class="reason">{{ row.reason }}</td>
+      <td class="num">{% if row.price_before %}{{ row.price_before | dollars }} → {% endif %}{{ row.price_after | dollars }}</td>
+    </tr>{% endfor %}</table>
+  </div>
+</div>
+</div>
+{% endblock %}

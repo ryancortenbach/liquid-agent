@@ -7,6 +7,7 @@ requires-python = ">=3.12"
 dependencies = [
   "dateparser>=1.2.2",
   "fastapi>=0.116.0",
+  "jinja2>=3.1.6",
   "openai>=2.0.0",
   "pillow>=11.3.0",
   "pillow-heif>=1.1.0",
@@ -23,7 +24,6 @@ integrations = [
   "google-api-python-client>=2.180.0",
   "google-auth-oauthlib>=1.2.2",
   "httpx>=0.28.0",
-  "jinja2>=3.1.6",
   "numpy>=2.3.0",
   "pyyaml>=6.0.2",
   "shippo>=3.9.0",

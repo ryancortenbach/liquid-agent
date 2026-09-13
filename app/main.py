@@ -69,6 +69,7 @@ from app.photos.pipeline import (
 )
 from app.photos.storage import MAX_PHOTO_BYTES, PhotoStorage
 from app.research.factory import build_comps_sources
+from app.web.dashboard import router as dashboard_router
 
 
 class PlanRequest(BaseModel):
@@ -257,6 +258,7 @@ def create_app(
             await app.state.ebay_publisher.close()
 
     app = FastAPI(title="Liquid", version="0.1.0", lifespan=lifespan)
+    app.include_router(dashboard_router)
 
     @app.get("/health")
     def health(clock: ClockDep) -> dict:
