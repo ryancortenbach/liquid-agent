@@ -147,9 +147,6 @@ Two minutes, both of us on camera, then the product. Under 100 MB so it lives in
 
 **[demo/video/liquid-demo.mp4](demo/video/liquid-demo.mp4)** (click, then press play on the GitHub page)
 
-Also in `demo/video/`: the verbatim captions (`liquid-demo.srt`), the transcript
-(`liquid-demo-transcript.txt`), and the one-minute technical script (`script-technical.txt`).
-
 ---
 
 ## Channel model
