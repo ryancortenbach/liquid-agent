@@ -243,7 +243,8 @@ def test_identify_then_confirm_then_enhance(tmp_path: Path) -> None:
             assert actions[:3] == ["intake", "identify", "confirm_identity"]
 
         send(client, "m3", "APPROVE")
-        assert adapter.sent_texts[-1].startswith("How would you describe the condition?")
+        assert "How would you describe the condition?" in adapter.sent_texts[-1]
+        assert adapter.sent_texts[-1].startswith("Locked in.")
 
 
 def test_named_correction_and_no_editor_fallback(tmp_path: Path) -> None:
@@ -255,7 +256,7 @@ def test_named_correction_and_no_editor_fallback(tmp_path: Path) -> None:
         send(client, "m1", "", with_photo=True)
         send(client, "m2", "no, it's the ipad air 4th gen 64gb")
         assert any(text.startswith("Got it") for text in adapter.sent_texts)
-        assert adapter.sent_texts[-1].startswith("How would you describe the condition?")
+        assert "How would you describe the condition?" in adapter.sent_texts[-1]
         with Session(app.state.engine) as session:
             item = session.exec(select(Item)).one()
             assert item.title == "the ipad air 4th gen 64gb"

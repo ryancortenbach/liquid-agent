@@ -160,7 +160,8 @@ def test_imessage_onboarding_to_listing_pack_without_ebay_sandbox(tmp_path: Path
     with TestClient(app) as client:
         send(client, "m1", "Apple iPad Air 5th gen 64GB wifi, sell by Sunday 6pm", with_photo=True)
         send(client, "m2", "APPROVE")
-        assert adapter.sent_texts[-1].startswith("How would you describe the condition?")
+        assert "How would you describe the condition?" in adapter.sent_texts[-1]
+        assert adapter.sent_texts[-1].startswith("Locked in.")
 
         send(client, "m3", "2, comes with the box and charger, small scratch on the back")
         assert adapter.sent_texts[-1].startswith("How fast")
@@ -403,7 +404,7 @@ def test_publishing_advances_to_next_batch_item(tmp_path: Path) -> None:
             "Next up (2 of 2): Bose QC45 headphones" in text
             for text in adapter.sent_texts
         )
-        assert adapter.sent_texts[-1].startswith("How would you describe the condition?")
+        assert "How would you describe the condition?" in adapter.sent_texts[-1]
         with Session(app.state.engine) as session:
             conversation = session.exec(select(SellerConversation)).one()
             assert conversation.active_item_id == second_id

@@ -224,7 +224,8 @@ def test_imessage_photo_preview_approval_and_deduplication(tmp_path: Path) -> No
         )
         assert approval.json()["status"] == "queued"
         assert adapter.sent_texts[-2] == "You bet. I'll use those photos."
-        assert adapter.sent_texts[-1].startswith("How would you describe the condition?")
+        assert "How would you describe the condition?" in adapter.sent_texts[-1]
+        assert adapter.sent_texts[-1].startswith("Locked in.")
 
         with Session(app.state.engine) as session:
             assert session.get(ProductPhoto, enhanced_id).status == PhotoStatus.APPROVED
@@ -873,3 +874,39 @@ def test_destination_wildcard_accepts_any_address_but_still_checks_the_sender(
             ),
         )
         assert stranger.json() == {"status": "ignored", "reason": "sender_not_allowed"}
+
+
+def test_photo_approval_confirms_and_asks_the_next_question(tmp_path: Path) -> None:
+    """Approving a photo must never be answered with silence."""
+    adapter = FakeMessageAdapter()
+    app = create_app(
+        Settings(
+            mode=Mode.SIM,
+            database_url="sqlite:///:memory:",
+            photo_storage_dir=str(tmp_path),
+            bb_webhook_secret="webhook-secret",
+            bb_allowed_destination="ryancortenbach77@gmail.com",
+            seller_handle="*",
+            require_ebay_onboarding=False,
+            openai_api_key=None,
+        ),
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+    )
+    with TestClient(app) as client:
+        client.post(
+            "/webhooks/bluebubbles?secret=webhook-secret",
+            json=message_payload(guid="approve-1", text="Sony headphones", with_photo=True),
+        )
+        assert adapter.sent_texts, "expected a preview prompt before approval"
+        before = len(adapter.sent_texts)
+
+        client.post(
+            "/webhooks/bluebubbles?secret=webhook-secret",
+            json=message_payload(guid="approve-2", text="yes"),
+        )
+        assert len(adapter.sent_texts) > before, "approving sent the seller nothing"
+        reply = adapter.sent_texts[-1]
+        assert reply.strip(), "approval reply was empty"
+        assert "Locked in." in reply
+        assert "How would you describe the condition?" in reply

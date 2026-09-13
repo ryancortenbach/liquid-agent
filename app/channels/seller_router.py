@@ -24,6 +24,7 @@ from app.inbound.identify import (
     crop_inventory_item,
     interpret_confirmation,
 )
+from app.intake.details import QUESTION_SETS, IntakeDetails
 from app.intake.item_guard import extract_separate_item_requests
 from app.ledger import write_decision
 from app.models import (
@@ -1278,8 +1279,30 @@ class SellerMessageRouter:
                 conversation.pending_photo_id = None
                 conversation.status = ConversationStatus.AWAITING_DETAILS
                 session.add(conversation)
+                if not approved:
+                    response = "No problem. We'll keep your original."
+                else:
+                    # Confirm the approval and ask the next question in the same breath.
+                    # Without this the seller approves, hears nothing, and has to speak
+                    # again before Liquid asks anything. Mirror ListingFlow.start_details
+                    # so it does not ask the condition question a second time.
+                    count = len(review_photos)
+                    confirmed = (
+                        f"Locked in. I'll use the {'new photos' if count > 1 else 'new photo'} "
+                        "for the listing."
+                    )
+                    response = confirmed
+                    if anchor is not None and not anchor.constraints_json.get("intake_asked"):
+                        anchor.constraints_json = {
+                            **anchor.constraints_json,
+                            "intake": IntakeDetails.from_dict(
+                                anchor.constraints_json.get("intake")
+                            ).as_dict(),
+                            "intake_asked": ["condition"],
+                        }
+                        session.add(anchor)
+                        response = f"{confirmed}\n\n{QUESTION_SETS['condition']}"
                 session.commit()
-                response = "" if approved else "No problem. We'll keep your original."
         if response:
             await self.adapter.send_text(
                 message.chat_guid,
