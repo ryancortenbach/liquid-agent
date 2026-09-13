@@ -33,8 +33,14 @@ seller approves it. The original is always kept.
 2. Grant Full Disk Access and set a server password.
 3. Run `uv run python scripts/configure_bluebubbles_local.py` on the BlueBubbles Mac to copy the
    local server password and generate a separate webhook secret without displaying either value.
-4. Add `SELLER_HANDLE` to `.env`. Use the phone number or email of the person texting the server,
-   not the iMessage account hosting BlueBubbles.
+4. Decide who Liquid answers. BlueBubbles sees every conversation on the Mac's iMessage
+   account, on every alias (the owner's phone number and each email), including group chats.
+   Run `uv run python scripts/imessage_accounts.py` to list the aliases this Mac replies from,
+   then `--set <liquid email>` to write `BB_ALLOWED_DESTINATION`. Liquid then answers only texts
+   sent to that address. `SELLER_HANDLE` can stay `*` (anyone who texts the Liquid address) or be a
+   comma-separated list of tester numbers. Group chats are always ignored unless
+   `BB_ALLOW_GROUP_CHATS=true`. Without `BB_ALLOWED_DESTINATION`, Liquid refuses to start and
+   the webhook ignores everything.
 5. Start Liquid with `uv run python scripts/run_local.py`. This runner disables access logging so
    the webhook secret is not written into request logs.
 6. Register the authenticated local inbound webhook with
@@ -51,9 +57,9 @@ If one photo contains several products, send it normally. Liquid inventories and
 sellable object, then asks the seller to confirm a numbered checklist. Use `REMOVE 3` to exclude an
 object or `3 is ...` to correct its identity. Send a closer photo if the checklist missed anything.
 
-Keep a specific `SELLER_HANDLE` during local testing. Set it to `*` only when intentionally opening
-the bot to multiple sellers. Each sender receives a separate seller, conversation, item, and eBay
-connection record.
+Keep a specific `SELLER_HANDLE` during local testing. Set it to `*` only together with
+`BB_ALLOWED_DESTINATION`, so the bot is open to multiple sellers on the Liquid address alone. Each
+sender receives a separate seller, conversation, item, and eBay connection record.
 
 ## 4. eBay
 

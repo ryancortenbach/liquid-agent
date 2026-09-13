@@ -29,6 +29,19 @@ def inbound_fingerprint(message: InboundMessage) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+GROUP_CHAT_STYLE = 43  # Messages.app chat.style: 43 = group, 45 = one-to-one
+
+
+def is_group_chat(chat: dict[str, Any]) -> bool:
+    """True for group threads; a reply there would go to everyone in the group."""
+    if chat.get("style") == GROUP_CHAT_STYLE or chat.get("isGroup") is True:
+        return True
+    participants = chat.get("participants")
+    if isinstance(participants, list) and len(participants) > 1:
+        return True
+    return ";+;" in str(chat.get("guid") or "")
+
+
 class BlueBubblesAdapter:
     def __init__(
         self,
@@ -46,6 +59,14 @@ class BlueBubblesAdapter:
     async def close(self) -> None:
         if self._owns_client:
             await self._client.aclose()
+
+    @staticmethod
+    def parse_chat_policy(payload: dict[str, Any]) -> tuple[str | None, bool]:
+        """(destination alias, is_group) for a webhook payload, without full validation."""
+        chats = (payload.get("data") or {}).get("chats") or []
+        if not chats:
+            return None, False
+        return chats[0].get("lastAddressedHandle"), is_group_chat(chats[0])
 
     def parse_inbound(self, payload: dict[str, Any]) -> InboundMessage | None:
         if payload.get("type") != "new-message":
@@ -70,15 +91,17 @@ class BlueBubblesAdapter:
             for attachment in data.get("attachments") or []
             if attachment.get("guid")
         )
+        chat = chats[0]
         return InboundMessage(
             guid=guid,
             handle=handle,
-            chat_guid=chats[0]["guid"],
-            destination_handle=chats[0].get("lastAddressedHandle"),
+            chat_guid=chat["guid"],
+            destination_handle=chat.get("lastAddressedHandle"),
             text=(data.get("text") or "").strip(),
             created_at=datetime.fromtimestamp(created_ms / 1000, tz=UTC),
             attachments=attachments,
             raw=payload,
+            is_group=is_group_chat(chat),
         )
 
     async def ping(self) -> bool:

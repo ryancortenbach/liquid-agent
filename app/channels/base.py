@@ -22,6 +22,7 @@ class InboundMessage:
     created_at: datetime
     attachments: tuple[InboundAttachment, ...]
     raw: dict[str, Any]
+    is_group: bool = False
 
 
 class ChannelAdapter(Protocol):

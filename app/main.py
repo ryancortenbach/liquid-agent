@@ -658,6 +658,9 @@ def create_app(
         if message is None:
             return {"status": "ignored"}
         sender_label = f"***{canonical_handle(message.handle)[-4:]}"
+        if message.is_group and not app_settings.bb_allow_group_chats:
+            log.info("Liquid inbound ignored sender=%s reason=group_chat", sender_label)
+            return {"status": "ignored", "reason": "group_chat"}
         allowed_destination = app_settings.bb_allowed_destination
         if allowed_destination and canonical_handle(message.destination_handle or "") != (
             canonical_handle(allowed_destination)
