@@ -4,6 +4,7 @@ import secrets
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Annotated
+from urllib.parse import urlparse
 
 from fastapi import (
     BackgroundTasks,
@@ -32,6 +33,12 @@ from app.engine.load_state import load_state
 from app.engine.policy import decide
 from app.engine.state import ItemState, default_channels
 from app.ledger import write_decision
+from app.market.ebay import (
+    EbayError,
+    EbayOfferInput,
+    EbayPublisher,
+    EbaySandboxClient,
+)
 from app.market.fees import instant_quote_cents
 from app.models import (
     Item,
@@ -78,6 +85,14 @@ class CreateItemRequest(PlanRequest):
 
 class PhotoReviewRequest(BaseModel):
     approved: bool
+
+
+class EbayListingRequest(BaseModel):
+    seller_approved: bool = False
+    price_cents: int | None = Field(default=None, gt=0)
+    category_id: str | None = None
+    description: str | None = None
+    aspects: dict[str, list[str]] = Field(default_factory=dict)
 
 
 def build_clock(settings: Settings) -> Clock:
@@ -144,6 +159,7 @@ def create_app(
     *,
     photo_editor: ProductPhotoEditor | None = None,
     message_adapter: BlueBubblesAdapter | None = None,
+    ebay_publisher: EbayPublisher | None = None,
 ) -> FastAPI:
     app_settings = settings or get_settings()
 
@@ -181,9 +197,26 @@ def create_app(
                 seller_handle=app_settings.seller_handle,
                 timezone=app_settings.tz,
             )
+        app.state.ebay_publisher = ebay_publisher
+        app.state.owns_ebay_publisher = False
+        if app.state.ebay_publisher is None and all(
+            (
+                app_settings.ebay_sb_client_id,
+                app_settings.ebay_sb_client_secret,
+                app_settings.ebay_sb_refresh_token,
+            )
+        ):
+            app.state.ebay_publisher = EbaySandboxClient(
+                app_settings.ebay_sb_client_id or "",
+                app_settings.ebay_sb_client_secret or "",
+                app_settings.ebay_sb_refresh_token or "",
+            )
+            app.state.owns_ebay_publisher = True
         yield
         if app.state.owns_message_adapter and app.state.message_adapter is not None:
             await app.state.message_adapter.close()
+        if app.state.owns_ebay_publisher and app.state.ebay_publisher is not None:
+            await app.state.ebay_publisher.close()
 
     app = FastAPI(title="Liquid", version="0.1.0", lifespan=lifespan)
 
@@ -348,6 +381,167 @@ def create_app(
                     .order_by(LedgerEvent.sim_at)
                 ).all()
             )
+
+    @app.post("/api/items/{item_id}/publish/ebay")
+    async def publish_item_to_ebay(
+        item_id: str,
+        body: EbayListingRequest,
+        request: Request,
+        engine: EngineDep,
+        clock: ClockDep,
+    ) -> dict:
+        publisher: EbayPublisher | None = request.app.state.ebay_publisher
+        if publisher is None:
+            raise HTTPException(status_code=503, detail="eBay sandbox is not configured")
+
+        required_settings = {
+            "merchant location": app_settings.ebay_sb_merchant_location_key,
+            "payment policy": app_settings.ebay_sb_payment_policy_id,
+            "return policy": app_settings.ebay_sb_return_policy_id,
+            "fulfillment policy": app_settings.ebay_sb_fulfillment_policy_id,
+        }
+        missing = [name for name, value in required_settings.items() if not value]
+        category_id = body.category_id or app_settings.ebay_sb_default_category_id
+        if not category_id:
+            missing.append("category")
+        if missing:
+            raise HTTPException(
+                status_code=503,
+                detail=f"eBay sandbox setup is missing: {', '.join(missing)}",
+            )
+        if not body.aspects:
+            raise HTTPException(
+                status_code=422,
+                detail="at least one truthful item aspect is required",
+            )
+
+        public_url = urlparse(app_settings.public_base_url)
+        if public_url.scheme != "https" or public_url.hostname in {"localhost", "127.0.0.1"}:
+            raise HTTPException(
+                status_code=503,
+                detail="PUBLIC_BASE_URL must be a public HTTPS URL for eBay images",
+            )
+
+        with Session(engine) as session:
+            item = session.get(Item, item_id)
+            if item is None:
+                raise HTTPException(status_code=404, detail="item not found")
+            approved_photos = session.exec(
+                select(ProductPhoto).where(
+                    ProductPhoto.item_id == item_id,
+                    ProductPhoto.status == PhotoStatus.APPROVED,
+                )
+            ).all()
+            if not approved_photos:
+                raise HTTPException(
+                    status_code=409,
+                    detail="approve at least one enhanced photo before preparing an eBay listing",
+                )
+            listing = session.exec(
+                select(Listing).where(Listing.item_id == item_id, Listing.channel == "ebay")
+            ).first()
+            if listing is not None and listing.external_id and listing.status == ListingStatus.LIVE:
+                return {
+                    "status": "live",
+                    "listing_id": listing.external_id,
+                    "seller_approved": True,
+                }
+            price_cents = body.price_cents or (listing.price_cents if listing else 0)
+            if price_cents <= 0:
+                price_cents = item.market_value_cents
+            offer_id = (
+                listing.external_id if listing and listing.status == ListingStatus.DRAFT else None
+            )
+            offer = EbayOfferInput(
+                sku=f"liquid-{item.id}",
+                title=item.title[:80],
+                description=body.description or f"{item.title}. Seller-provided item photo.",
+                condition={
+                    "A": "USED_EXCELLENT",
+                    "B": "USED_VERY_GOOD",
+                    "C": "USED_ACCEPTABLE",
+                }[item.condition.value],
+                aspects=body.aspects,
+                image_urls=[
+                    f"{app_settings.public_base_url.rstrip('/')}/api/photos/{photo.id}/file"
+                    for photo in approved_photos
+                ],
+                category_id=category_id or "",
+                marketplace_id=app_settings.ebay_marketplace_id,
+                currency=app_settings.ebay_currency,
+                price_cents=price_cents,
+                merchant_location_key=app_settings.ebay_sb_merchant_location_key or "",
+                payment_policy_id=app_settings.ebay_sb_payment_policy_id or "",
+                return_policy_id=app_settings.ebay_sb_return_policy_id or "",
+                fulfillment_policy_id=app_settings.ebay_sb_fulfillment_policy_id or "",
+            )
+
+        try:
+            if offer_id is None:
+                draft = await publisher.create_draft(offer)
+                offer_id = draft.offer_id
+                with Session(engine) as session:
+                    listing = session.exec(
+                        select(Listing).where(
+                            Listing.item_id == item_id,
+                            Listing.channel == "ebay",
+                        )
+                    ).first()
+                    if listing is None:
+                        listing = Listing(
+                            item_id=item_id,
+                            channel="ebay",
+                            price_cents=price_cents,
+                        )
+                    listing.external_id = offer_id
+                    listing.price_cents = price_cents
+                    listing.status = ListingStatus.DRAFT
+                    session.add(listing)
+                    session.commit()
+            if not body.seller_approved:
+                return {
+                    "status": "draft",
+                    "offer_id": offer_id,
+                    "seller_approved": False,
+                }
+            publication = await publisher.publish(offer_id, app_settings.ebay_marketplace_id)
+        except EbayError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        with Session(engine) as session:
+            item = session.get(Item, item_id)
+            listing = session.exec(
+                select(Listing).where(Listing.item_id == item_id, Listing.channel == "ebay")
+            ).one()
+            listing.external_id = publication.listing_id
+            listing.status = ListingStatus.LIVE
+            listing.published_at = clock.now()
+            if item is not None:
+                item.status = ItemStatus.LIVE
+                session.add(item)
+            session.add(listing)
+            write_decision(
+                session,
+                item_id=item_id,
+                sim_at=clock.now(),
+                wall_at=clock.wall(),
+                kind="seller",
+                action="publish_ebay",
+                inputs={
+                    "listing_id": publication.listing_id,
+                    "price_cents": listing.price_cents,
+                    "marketplace_id": app_settings.ebay_marketplace_id,
+                },
+                reason="seller approved publication to the eBay sandbox",
+                price_before=None,
+                price_after=listing.price_cents,
+            )
+            session.commit()
+        return {
+            "status": "live",
+            "listing_id": publication.listing_id,
+            "seller_approved": True,
+        }
 
     @app.post("/api/items/{item_id}/photos/enhance", status_code=201)
     async def enhance_photo(

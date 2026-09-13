@@ -24,7 +24,15 @@ async def run(live: bool) -> int:
     except Exception as exc:
         results.append(("Core database", "FAIL", type(exc).__name__))
 
-    if configured(settings.bb_password):
+    bluebubbles_values = {
+        "BB_PASSWORD": settings.bb_password,
+        "BB_WEBHOOK_SECRET": settings.bb_webhook_secret,
+        "SELLER_HANDLE": settings.seller_handle,
+    }
+    bluebubbles_missing = [
+        name for name, value in bluebubbles_values.items() if not configured(value)
+    ]
+    if not bluebubbles_missing:
         if live:
             adapter = BlueBubblesAdapter(settings.bb_server_url, settings.bb_password or "")
             try:
@@ -37,7 +45,27 @@ async def run(live: bool) -> int:
         else:
             results.append(("BlueBubbles", "READY", "credentials present"))
     else:
-        results.append(("BlueBubbles", "MISSING", "BB_PASSWORD"))
+        results.append(("BlueBubbles", "MISSING", ", ".join(bluebubbles_missing)))
+
+    ebay_sell_values = {
+        "EBAY_SB_CLIENT_ID": settings.ebay_sb_client_id,
+        "EBAY_SB_CLIENT_SECRET": settings.ebay_sb_client_secret,
+        "EBAY_SB_REFRESH_TOKEN": settings.ebay_sb_refresh_token,
+        "EBAY_SB_MERCHANT_LOCATION_KEY": settings.ebay_sb_merchant_location_key,
+        "EBAY_SB_PAYMENT_POLICY_ID": settings.ebay_sb_payment_policy_id,
+        "EBAY_SB_RETURN_POLICY_ID": settings.ebay_sb_return_policy_id,
+        "EBAY_SB_FULFILLMENT_POLICY_ID": settings.ebay_sb_fulfillment_policy_id,
+    }
+    ebay_sell_missing = [name for name, value in ebay_sell_values.items() if not configured(value)]
+    results.append(
+        (
+            "eBay Sell sandbox",
+            "READY" if not ebay_sell_missing else "MISSING",
+            "credentials and policies present"
+            if not ebay_sell_missing
+            else ", ".join(ebay_sell_missing),
+        )
+    )
 
     checks = [
         ("OpenAI image editing", settings.openai_api_key, "OPENAI_API_KEY"),

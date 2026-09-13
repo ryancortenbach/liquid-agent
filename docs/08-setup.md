@@ -37,8 +37,18 @@ The generated image remains in `review` until the seller approves it. The origin
 
 1. Create developer sandbox and production keysets at `developer.ebay.com`.
 2. Create an eBay sandbox test user and redirect URL.
-3. Add the client ids, secrets, RuName, and sandbox refresh token to `.env`.
-4. Use sandbox for hackathon publication. Production publication requires explicit seller approval.
+3. Create a sandbox inventory location and note its merchant location key.
+4. Opt the sandbox seller into business policies, then create payment, return, and fulfillment
+   policies.
+5. Add the client id, client secret, RuName, refresh token, location key, and three policy ids to
+   `.env`.
+6. Set `PUBLIC_BASE_URL` to public HTTPS so eBay can fetch approved listing images.
+7. Prepare a draft with `POST /api/items/{item_id}/publish/ebay` and
+   `{"seller_approved": false, "aspects": {"Brand": ["Sony"]}}`.
+8. Publish only after review by repeating the request with `seller_approved` set to `true`.
+
+Liquid stores the eBay offer id while the listing is a draft. It marks the listing live only after
+eBay returns a listing id. Production publication is not configured by this sandbox adapter.
 
 ## 5. Facebook Marketplace
 

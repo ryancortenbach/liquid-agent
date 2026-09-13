@@ -70,3 +70,7 @@ never enter the listing image set before approval.
 For iMessage, configure BlueBubbles and the webhook values described in `docs/08-setup.md`. A
 seller can then text a photo and caption, receive the original and enhanced versions, and reply
 `APPROVE` or `REJECT` without using the API directly.
+
+The eBay sandbox path is `POST /api/items/{item_id}/publish/ebay`. It creates a draft from approved
+photos first. The offer is published only when the request explicitly includes
+`"seller_approved": true`, and Liquid marks it live only after eBay returns a listing id.

@@ -35,6 +35,17 @@ class Settings(BaseSettings):
     seller_handle: str | None = None
     ebay_client_id: str | None = None
     ebay_client_secret: str | None = None
+    ebay_sb_client_id: str | None = None
+    ebay_sb_client_secret: str | None = None
+    ebay_sb_runame: str | None = None
+    ebay_sb_refresh_token: str | None = None
+    ebay_marketplace_id: str = "EBAY_US"
+    ebay_currency: str = "USD"
+    ebay_sb_merchant_location_key: str | None = None
+    ebay_sb_payment_policy_id: str | None = None
+    ebay_sb_return_policy_id: str | None = None
+    ebay_sb_fulfillment_policy_id: str | None = None
+    ebay_sb_default_category_id: str | None = None
     shippo_api_key: str | None = None
     google_oauth_client_json: str = "./secrets/gcal_client.json"
     google_token_json: str = "./secrets/gcal_token.json"

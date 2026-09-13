@@ -364,8 +364,7 @@ class SellerMessageRouter:
                     "Approved. The original stays in the listing set too."
                     if approved
                     else (
-                        "Rejected. I will not use that enhanced image. "
-                        "Send another photo to retry."
+                        "Rejected. I will not use that enhanced image. Send another photo to retry."
                     )
                 )
         await self.adapter.send_text(

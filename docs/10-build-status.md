@@ -13,17 +13,18 @@ Updated 2026-09-13.
 - Mandatory seller review before an enhanced image can join the listing image set
 - Authenticated BlueBubbles webhook with sender allowlisting and event deduplication
 - Complete iMessage photo intake, enhancement preview, approval, rejection, and status flow
+- eBay sandbox inventory, reusable offer draft, and seller-approved publication flow
 - SQLite sale claims that pause duplicates and support confirmed or failed marketplace closes
 - Deadline pricing engine, guard, ledger, outbox, simulation, and evaluation artifacts
 - FastAPI item, photo enhancement, photo review, file, planning, tick, and ledger endpoints
-- 38 passing unit, API, property, clock, simulation, sale-claim, photo, and iMessage tests
+- 41 passing unit, API, property, clock, simulation, sale-claim, photo, iMessage, and eBay tests
 
 ## Ordered P0 queue
 
 1. Add product identity and defect extraction before image editing.
 2. Add automated comparison checks between original and generated images.
 3. Complete a live BlueBubbles and OpenAI smoke test after credentials are configured.
-4. Publish approved listing packs to the eBay sandbox.
+4. Complete a live eBay sandbox smoke test after seller policies are configured.
 5. Build the assisted Facebook Marketplace publication flow.
 6. Add the outbox delivery worker and restart tests.
 7. Build the demo dashboard and recorded scenario.
