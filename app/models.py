@@ -73,6 +73,10 @@ class ConversationStatus(StrEnum):
     PROCESSING_PHOTO = "processing_photo"
     AWAITING_PHOTO_REVIEW = "awaiting_photo_review"
     AWAITING_DETAILS = "awaiting_details"
+    RESEARCHING = "researching"
+    AWAITING_CONFIRMATION = "awaiting_confirmation"
+    PUBLISHING = "publishing"
+    LISTED = "listed"
 
 
 class Seller(SQLModel, table=True):
@@ -256,3 +260,58 @@ class DemandObs(SQLModel, table=True):
     kind: str
     sim_at: datetime
     value: float = Field(default=1.0, ge=0)
+
+
+class ListingPackStatus(StrEnum):
+    DRAFT = "draft"
+    APPROVED = "approved"
+    PUBLISHED = "published"
+    HANDOFF_READY = "handoff_ready"
+    FAILED = "failed"
+
+
+class ResearchResult(SQLModel, table=True):
+    id: str = Field(default_factory=new_id, primary_key=True)
+    item_id: str = Field(foreign_key="item.id", index=True)
+    query: str
+    sold_n: int = Field(default=0, ge=0)
+    active_n: int = Field(default=0, ge=0)
+    sold_median_cents: int | None = None
+    active_median_cents: int | None = None
+    market_value_cents: int = Field(gt=0)
+    sigma_cents: int = Field(gt=0)
+    basis: str = "active"
+    sources_json: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSON, nullable=False)
+    )
+    specifics_json: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON, nullable=False)
+    )
+    created_at: datetime = Field(default_factory=utc_now)
+
+
+class ListingPack(SQLModel, table=True):
+    id: str = Field(default_factory=new_id, primary_key=True)
+    item_id: str = Field(foreign_key="item.id", index=True)
+    channel: str
+    title: str
+    description: str
+    price_cents: int = Field(gt=0)
+    condition: str = "USED_GOOD"
+    specifics_json: dict[str, Any] = Field(
+        default_factory=dict, sa_column=Column(JSON, nullable=False)
+    )
+    photo_ids_json: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    schedule_json: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSON, nullable=False)
+    )
+    sources_json: list[dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSON, nullable=False)
+    )
+    status: ListingPackStatus = ListingPackStatus.DRAFT
+    external_id: str | None = None
+    external_url: str | None = None
+    handoff_path: str | None = None
+    failure_reason: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    published_at: datetime | None = None

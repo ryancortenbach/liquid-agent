@@ -1,0 +1,21 @@
+{
+  "note": "Offline fixture. Representative values; every row is labeled source=fixture.",
+  "sold": [
+    {"title": "Sony WH-1000XM5 Wireless Noise Canceling Headphones Black", "priceValue": 198, "soldDate": "2026-09-11", "condition": "Used", "canonicalUrl": "https://www.ebay.com/itm/fixture-xm5-sold-1"},
+    {"title": "Sony WH-1000XM5 Headphones Silver Good", "priceValue": 185, "soldDate": "2026-09-10", "condition": "Used", "canonicalUrl": "https://www.ebay.com/itm/fixture-xm5-sold-2"},
+    {"title": "Sony WH-1000XM5 Noise Cancelling Over-Ear Black", "priceValue": 210, "soldDate": "2026-09-09", "condition": "Used", "canonicalUrl": "https://www.ebay.com/itm/fixture-xm5-sold-3"},
+    {"title": "Sony WH-1000XM5 Wireless Headphones Midnight Blue", "priceValue": 205, "soldDate": "2026-09-08", "condition": "Used", "canonicalUrl": "https://www.ebay.com/itm/fixture-xm5-sold-4"},
+    {"title": "Sony WH-1000XM5 Black with Case", "priceValue": 192, "soldDate": "2026-09-07", "condition": "Used", "canonicalUrl": "https://www.ebay.com/itm/fixture-xm5-sold-5"},
+    {"title": "Sony WH1000XM5 Headphones Silver", "priceValue": 178, "soldDate": "2026-09-06", "condition": "Used", "canonicalUrl": "https://www.ebay.com/itm/fixture-xm5-sold-6"},
+    {"title": "Sony WH-1000XM5 Wireless Noise Canceling Headphones Black", "priceValue": 215, "soldDate": "2026-09-05", "condition": "Used", "canonicalUrl": "https://www.ebay.com/itm/fixture-xm5-sold-7"},
+    {"title": "Replacement Ear Pads for Sony WH-1000XM5", "priceValue": 12, "soldDate": "2026-09-05", "condition": "New", "canonicalUrl": "https://www.ebay.com/itm/fixture-xm5-decoy-1"}
+  ],
+  "active": [
+    {"title": "Sony WH-1000XM5 Wireless Noise Canceling Headphones Black", "price": 229, "condition": "Used", "itemUrl": "https://www.ebay.com/itm/fixture-xm5-active-1"},
+    {"title": "Sony WH-1000XM5 Headphones Silver", "price": 219, "condition": "Used", "itemUrl": "https://www.ebay.com/itm/fixture-xm5-active-2"},
+    {"title": "Sony WH-1000XM5 Over-Ear Black Excellent", "price": 245, "condition": "Used", "itemUrl": "https://www.ebay.com/itm/fixture-xm5-active-3"},
+    {"title": "Sony WH-1000XM5 Midnight Blue", "price": 239, "condition": "Used", "itemUrl": "https://www.ebay.com/itm/fixture-xm5-active-4"},
+    {"title": "Sony WH-1000XM5 Black", "price": 225, "condition": "Used", "itemUrl": "https://www.ebay.com/itm/fixture-xm5-active-5"},
+    {"title": "Sony WH1000XM5 Silver", "price": 209, "condition": "Used", "itemUrl": "https://www.ebay.com/itm/fixture-xm5-active-6"}
+  ]
+}

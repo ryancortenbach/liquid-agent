@@ -1,0 +1,28 @@
+{
+  "note": "Offline fixture. Values are representative of September 2026 public price guides; every row is labeled source=fixture.",
+  "sold": [
+    {"title": "Apple iPad Air 5th Gen 64GB Wi-Fi Blue M1 A2588", "priceValue": 305, "soldDate": "2026-09-11", "condition": "Used", "canonicalUrl": "https://www.ebay.com/itm/fixture-sold-1"},
+    {"title": "iPad Air 5th Generation 64GB WiFi Space Gray", "priceValue": 289, "soldDate": "2026-09-10", "condition": "Used", "canonicalUrl": "https://www.ebay.com/itm/fixture-sold-2"},
+    {"title": "Apple iPad Air (5th Gen) 64GB Wi-Fi Starlight", "priceValue": 318, "soldDate": "2026-09-10", "condition": "Used", "canonicalUrl": "https://www.ebay.com/itm/fixture-sold-3"},
+    {"title": "iPad Air 5 M1 64GB Wi-Fi Purple Good Condition", "priceValue": 296, "soldDate": "2026-09-09", "condition": "Used", "canonicalUrl": "https://www.ebay.com/itm/fixture-sold-4"},
+    {"title": "Apple iPad Air 5th Gen 64GB Wi-Fi Pink", "priceValue": 330, "soldDate": "2026-09-08", "condition": "Used", "canonicalUrl": "https://www.ebay.com/itm/fixture-sold-5"},
+    {"title": "Apple iPad Air 5th Gen 64GB WiFi Blue", "priceValue": 274, "soldDate": "2026-09-07", "condition": "Used", "canonicalUrl": "https://www.ebay.com/itm/fixture-sold-6"},
+    {"title": "iPad Air 5th Gen 64GB Wi-Fi Space Gray Excellent", "priceValue": 341, "soldDate": "2026-09-06", "condition": "Used", "canonicalUrl": "https://www.ebay.com/itm/fixture-sold-7"},
+    {"title": "Apple iPad Air 5 64GB Wi-Fi M1 Starlight", "priceValue": 300, "soldDate": "2026-09-05", "condition": "Used", "canonicalUrl": "https://www.ebay.com/itm/fixture-sold-8"},
+    {"title": "iPad Air 5th Gen 64GB Wi-Fi Blue A2588", "priceValue": 312, "soldDate": "2026-09-04", "condition": "Used", "canonicalUrl": "https://www.ebay.com/itm/fixture-sold-9"},
+    {"title": "Apple iPad Air 5th Gen 64GB Wi-Fi Purple", "priceValue": 285, "soldDate": "2026-09-03", "condition": "Used", "canonicalUrl": "https://www.ebay.com/itm/fixture-sold-10"},
+    {"title": "iPad Air 5th Gen 64GB Wi-Fi Cracked Screen For Parts", "priceValue": 95, "soldDate": "2026-09-02", "condition": "For parts", "canonicalUrl": "https://www.ebay.com/itm/fixture-decoy-1"},
+    {"title": "Case for iPad Air 5th Gen 10.9 inch", "priceValue": 14, "soldDate": "2026-09-02", "condition": "New", "canonicalUrl": "https://www.ebay.com/itm/fixture-decoy-2"}
+  ],
+  "active": [
+    {"title": "Apple iPad Air 5th Gen 64GB Wi-Fi Blue M1", "price": 349, "condition": "Used", "itemUrl": "https://www.ebay.com/itm/fixture-active-1"},
+    {"title": "iPad Air 5th Generation 64GB WiFi Space Gray", "price": 329, "condition": "Used", "itemUrl": "https://www.ebay.com/itm/fixture-active-2"},
+    {"title": "Apple iPad Air (5th Gen) 64GB Wi-Fi Starlight", "price": 365, "condition": "Used", "itemUrl": "https://www.ebay.com/itm/fixture-active-3"},
+    {"title": "iPad Air 5 M1 64GB Wi-Fi Purple", "price": 339, "condition": "Used", "itemUrl": "https://www.ebay.com/itm/fixture-active-4"},
+    {"title": "Apple iPad Air 5th Gen 64GB Wi-Fi Pink", "price": 399, "condition": "Used", "itemUrl": "https://www.ebay.com/itm/fixture-active-5"},
+    {"title": "Apple iPad Air 5th Gen 64GB WiFi Blue", "price": 319, "condition": "Used", "itemUrl": "https://www.ebay.com/itm/fixture-active-6"},
+    {"title": "iPad Air 5th Gen 64GB Wi-Fi Space Gray", "price": 355, "condition": "Used", "itemUrl": "https://www.ebay.com/itm/fixture-active-7"},
+    {"title": "Apple iPad Air 5 64GB Wi-Fi M1 Starlight", "price": 345, "condition": "Used", "itemUrl": "https://www.ebay.com/itm/fixture-active-8"},
+    {"title": "Keyboard Case for iPad Air 5th Gen", "price": 39, "condition": "New", "itemUrl": "https://www.ebay.com/itm/fixture-decoy-3"}
+  ]
+}
