@@ -9,7 +9,7 @@ from app.channels.base import InboundMessage
 from app.channels.chat_ai import ChatIntent, ChatInterpreter
 from app.channels.seller_router import SellerMessageRouter
 from app.intake.details import QUESTION_SETS
-from app.intake.flow import GO_WORDS, ListingFlow
+from app.intake.flow import CANCEL_WORDS, GO_WORDS, ListingFlow
 from app.intake.item_guard import extract_separate_item_requests, separate_items_reply
 from app.models import ConversationStatus, Item, SellerConversation
 
@@ -196,6 +196,19 @@ class PipelineRouter:
                 intent="repeat_question",
             )
             return
+        text = message.text.strip()
+        lowered = text.lower().rstrip(".!")
+        if text and not message.attachments and "?" not in text:
+            # While Liquid is waiting on an answer, the answer must reach the intake
+            # parser before the chat model can mistake it for small talk and swallow it.
+            # A message with a question mark is still a question for the model.
+            status = self.base.chat_context(message.handle).get("conversation_status")
+            answer_expected = status == "awaiting_details" or (
+                status == "awaiting_confirmation"
+                and (lowered in GO_WORDS | CANCEL_WORDS or has_change_request(text))
+            )
+            if answer_expected and await self.flow.handle(message):
+                return
         if (
             self.chat_interpreter is not None
             and not message.attachments

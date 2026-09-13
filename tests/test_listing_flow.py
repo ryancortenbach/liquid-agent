@@ -531,3 +531,57 @@ def test_placeholder_price_is_called_out_before_go(tmp_path: Path) -> None:
         send(client, "g4", "3 days")
         card = adapter.sent_texts[-1]
         assert "that number is a guess" in card, card
+
+
+class ReplyToEverything:
+    """A chat model that treats every message as small talk, like the live one did."""
+
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    async def interpret(self, *, handle: str, text: str, context: dict):
+        from app.channels.chat_ai import ChatIntent, ChatInterpretation
+
+        self.seen.append(text)
+        return ChatInterpretation(intent=ChatIntent.REPLY, reply="Great, thanks.")
+
+
+def test_answers_reach_the_intake_parser_before_the_chat_model(tmp_path: Path) -> None:
+    """Live bug: "Good" at the condition question was answered with "Great, thanks"
+    and never recorded, leaving the seller stuck."""
+    adapter = FakeMessageAdapter()
+    chat = ReplyToEverything()
+    settings = make_settings(
+        tmp_path, public_base_url="https://demo.example.com", ebay_demo_mode=True
+    )
+    app = create_app(
+        settings,
+        photo_editor=FakePhotoEditor(),
+        message_adapter=adapter,
+        chat_interpreter=chat,  # type: ignore[arg-type]
+    )
+    with TestClient(app) as client:
+        send(client, "a1", "Apple iPad Air tablet", with_photo=True)
+        send(client, "a2", "approve")
+        assert "How would you describe the condition?" in adapter.sent_texts[-1]
+
+        send(client, "a3", "Good")
+        assert adapter.sent_texts[-1].startswith("How fast"), adapter.sent_texts[-1]
+        assert "Great, thanks." not in adapter.sent_texts
+        with Session(app.state.engine) as session:
+            item = session.exec(select(Item)).one()
+            assert item.constraints_json["intake"]["condition"] == "B"
+
+        send(client, "a4", "3 days")
+        assert adapter.sent_texts[-1].startswith("Here's the plan"), adapter.sent_texts[-1]
+
+        # A change at confirmation must also bypass the chat model.
+        send(client, "a5", "ebay only, $350")
+        card = adapter.sent_texts[-1]
+        assert "list at $350" in card and "facebook" not in card, card
+        assert "Great, thanks." not in adapter.sent_texts
+
+        # A real question still goes to the chat model.
+        send(client, "a6", "what happens if it doesn't sell?")
+        assert adapter.sent_texts[-1] == "Great, thanks."
+        assert chat.seen[-1] == "what happens if it doesn't sell?"
