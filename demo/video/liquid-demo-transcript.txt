@@ -1,0 +1,47 @@
+Hi, my name is Ryan.
+Hi, my name is Tensae Laki.
+And we're both Columbia students studying computer science.
+Today we built Liquid, a seller's tool
+to sell products extremely fast.
+Imagine you have a bottle that you want to sell,
+but don't really have the time or capacity to do that.
+You can just text Liquid
+and it will sort everything out for you.
+First, all you have to do is just submit a picture of it
+and describe it in a few sentences,
+and then you will have a listing in under five minutes.
+Nice, yeah.
+And so how it works is OpenAI Vision
+identifies the item,
+and then an image model produces the listing photo,
+which is redefined and just a little touched up
+so users can see what the item actually looks like.
+And then a second call compares it against the original
+and blocks any edit changes that could have been bad
+or deceitful because we wanted people
+to see what real products look like.
+And then Apify pulls sold
+and active daily eBay comps.
+So it can basically see what the item looks like
+and how it's been sold over time.
+And then it also has a deterministic pricing engine
+so we can have the best price sold
+and so that people can actually have
+the most fair price for the items
+and actually have some money back.
+We also use BlueBubbles to test our software in general.
+BlueBubbles is an iMessage software
+that helps you text yourself or have your friend text you
+so that you can demo the product.
+One thing that separates Liquid
+from other sales agents out there
+is that we have our own pricing engine,
+which takes in all different data points from Apify.
+So we scrape active and sold listings.
+Then we find out whether or not there was specific copy
+or specific keywords,
+or there was a certain price
+that people sold something for.
+And then we go and price your product at the same
+or depending on how fast you want to sell your product,
+more or less in price.

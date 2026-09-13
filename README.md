@@ -50,7 +50,7 @@ Facebook Marketplace and OfferUp receive generated handoff files (`data/handoff/
 The judge path needs no iMessage and no eBay keys. Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-git clone https://github.com/ryancortenbach/AFE.git && cd AFE
+git clone https://github.com/ryancortenbach/liquid-agent.git && cd liquid-agent
 uv sync --all-extras
 cp .env.example .env
 ```
@@ -143,8 +143,12 @@ latency or delayed settlement.
 
 ## 05 Demo video
 
-Two minutes, one seller, one iPad Air, iMessage on the left and the dashboard on the right:
-_link to be added before submission_
+Two minutes, both of us on camera, then the product. Under 100 MB so it lives in the repo:
+
+**[demo/video/liquid-demo.mp4](demo/video/liquid-demo.mp4)** (click, then press play on the GitHub page)
+
+Also in `demo/video/`: the verbatim captions (`liquid-demo.srt`), the transcript
+(`liquid-demo-transcript.txt`), and the one-minute technical script (`script-technical.txt`).
 
 ---
 

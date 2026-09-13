@@ -1,0 +1,20 @@
+LIQUID: ONE-MINUTE TECHNICAL WALKTHROUGH (about 155 words, spoken)
+
+Under the hood, Liquid is one orchestrator with five external apps as tools.
+
+The seller texts a photo. BlueBubbles delivers it over a webhook and a poller, and every
+message is fingerprinted, so delayed redeliveries never trigger a second reply. Today that
+caught thirty-two duplicates and refused ten messages from a number not on the allowlist.
+
+OpenAI vision identifies the item. An image model produces the listing photo, then a second
+call compares it against the original and blocks any edit that changes the product or hides a
+defect. The seller still has to approve it.
+
+Apify pulls sold and active eBay comps. Those feed a deterministic pricing engine, no LLM in
+the loop, that solves for the seller's deadline and floor, and reprices on its own clock.
+
+On "go", the eBay Sell API creates the inventory item and offer. Gmail watches for offers and
+sales. Every action writes a ledger row.
+
+Twelve invariants, one hundred seventy-two tests, twelve thousand simulation runs, zero
+violations.
