@@ -68,6 +68,7 @@ from app.photos.pipeline import (
     enhance_product_photo,
 )
 from app.photos.storage import MAX_PHOTO_BYTES, PhotoStorage
+from app.pricing.repricer import reprice_item
 from app.research.factory import build_comps_sources
 from app.web.dashboard import router as dashboard_router
 
@@ -99,6 +100,10 @@ class DetailsRequest(BaseModel):
 
 class PlanListingRequest(BaseModel):
     research: bool = True
+
+
+class ClockSkipRequest(BaseModel):
+    hours: float = Field(gt=0, le=24 * 400)
 
 
 class EbayListingRequest(BaseModel):
@@ -484,6 +489,42 @@ def create_app(
             return await flow.publish(item_id)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/items/{item_id}/reprice")
+    async def reprice(item_id: str, request: Request, engine: EngineDep, clock: ClockDep) -> dict:
+        try:
+            outcome = await reprice_item(
+                engine=engine,
+                clock=clock,
+                settings=app_settings,
+                item_id=item_id,
+                ebay_publisher=request.app.state.ebay_publisher,
+                adapter=request.app.state.message_adapter,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return outcome.as_dict()
+
+    @app.post("/api/clock/skip")
+    def clock_skip(body: ClockSkipRequest, clock: ClockDep) -> dict:
+        delta = timedelta(hours=body.hours)
+        if isinstance(clock, SimClock):
+            now = clock.advance(delta)
+        elif isinstance(clock, DemoClock):
+            now = clock.skip(delta)
+        else:
+            raise HTTPException(status_code=409, detail="the real clock cannot be skipped")
+        return {"sim_at": now}
+
+    @app.post("/api/clock/{action}")
+    def clock_control(action: str, clock: ClockDep) -> dict:
+        if not isinstance(clock, DemoClock):
+            raise HTTPException(status_code=409, detail="only the demo clock can be paused")
+        if action == "pause":
+            return {"sim_at": clock.pause(), "paused": True}
+        if action == "resume":
+            return {"sim_at": clock.resume(), "paused": False}
+        raise HTTPException(status_code=404, detail="unknown clock action")
 
     @app.get("/api/items/{item_id}/packs")
     def list_packs(item_id: str, engine: EngineDep) -> list[dict]:

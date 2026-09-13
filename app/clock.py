@@ -74,6 +74,16 @@ class DemoClock:
             elapsed = (wall - self._wall_anchor).total_seconds() * self._speed
             return self._sim_anchor + timedelta(seconds=elapsed)
 
+    def skip(self, delta: timedelta) -> datetime:
+        """Jump the simulated clock forward (the demo's "skip ahead" control)."""
+        if delta.total_seconds() < 0:
+            raise ValueError("demo clock cannot move backward")
+        with self._lock:
+            self._sim_anchor += delta
+            return self.now() if self._paused_at is None else self._sim_anchor + timedelta(
+                seconds=(self._paused_at - self._wall_anchor).total_seconds() * self._speed
+            )
+
     def resume(self) -> datetime:
         with self._lock:
             if self._paused_at is not None:

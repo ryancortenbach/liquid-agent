@@ -52,6 +52,12 @@ class EbayPublisher(Protocol):
     async def close(self) -> None: ...
 
 
+class EbayRepricer(Protocol):
+    async def update_price(
+        self, *, sku: str, offer_id: str, price_cents: int, currency: str, marketplace_id: str
+    ) -> None: ...
+
+
 class EbaySandboxClient:
     api_base_url = "https://api.sandbox.ebay.com"
     token_url = "https://api.sandbox.ebay.com/identity/v1/oauth2/token"
@@ -193,3 +199,29 @@ class EbaySandboxClient:
         if not isinstance(listing_id, str) or not listing_id:
             raise EbayError("eBay publish response did not contain a listing ID")
         return EbayPublication(offer_id=offer_id, listing_id=listing_id)
+
+    async def update_price(
+        self, *, sku: str, offer_id: str, price_cents: int, currency: str, marketplace_id: str
+    ) -> None:
+        """Change a live offer's price without resending the offer (bulkUpdatePriceQuantity)."""
+        price = str((Decimal(price_cents) / Decimal(100)).quantize(Decimal("0.01")))
+        response = await self._request(
+            "POST",
+            "/sell/inventory/v1/bulk_update_price_quantity",
+            marketplace_id=marketplace_id,
+            json={
+                "requests": [
+                    {
+                        "sku": sku,
+                        "offers": [
+                            {"offerId": offer_id, "price": {"currency": currency, "value": price}}
+                        ],
+                    }
+                ]
+            },
+        )
+        for entry in response.json().get("responses", []):
+            status = entry.get("statusCode")
+            if isinstance(status, int) and status >= 400:
+                errors = entry.get("errors") or [{}]
+                raise EbayError(str(errors[0].get("message") or f"price update failed ({status})"))

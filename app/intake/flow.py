@@ -488,6 +488,7 @@ class ListingFlow:
                         assert pack is not None
                         pack.status = ListingPackStatus.PUBLISHED
                         pack.external_id = result.listing_id
+                        pack.external_offer_id = result.offer_id
                         pack.external_url = listing_url
                         pack.published_at = now
                         session.add(pack)

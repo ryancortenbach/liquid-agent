@@ -310,6 +310,7 @@ class ListingPack(SQLModel, table=True):
     )
     status: ListingPackStatus = ListingPackStatus.DRAFT
     external_id: str | None = None
+    external_offer_id: str | None = None
     external_url: str | None = None
     handoff_path: str | None = None
     failure_reason: str | None = None
