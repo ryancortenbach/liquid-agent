@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -11,9 +11,49 @@ from app.clock import Clock
 from app.config import Settings
 from app.ledger import write_decision
 from app.market.ebay import EbayError, EbayOfferInput, EbayPublisher
+from app.market.ebay_taxonomy import EbayTaxonomyClient, resolve_category
 from app.models import Item, ItemStatus, Listing, ListingStatus, PhotoStatus, ProductPhoto
+from app.photos.storage import PhotoStorage
 
 CONDITION_ENUM = {"A": "USED_EXCELLENT", "B": "USED_VERY_GOOD", "C": "USED_ACCEPTABLE"}
+
+# Photos already hosted on eBay Picture Services this process, by content hash. EPS keeps an
+# unused picture for 30 days, far longer than any listing session.
+_HOSTED_PICTURES: dict[str, str] = {}
+
+
+def public_image_base(settings: Settings) -> str | None:
+    """The base URL eBay could fetch photos from, or None when this machine is not reachable."""
+    public_url = urlparse(settings.public_base_url)
+    if public_url.scheme != "https" or public_url.hostname in {"localhost", "127.0.0.1"}:
+        return None
+    return settings.public_base_url.rstrip("/")
+
+
+async def host_photos_on_ebay(
+    uploader: Callable[..., Awaitable[str]],
+    storage: PhotoStorage,
+    photos: list[tuple[str, str, str, str]],
+) -> list[str]:
+    """Upload approved photos to eBay and return their hosted URLs (cached by content hash)."""
+    urls: list[str] = []
+    for photo_id, file_path, mime_type, sha256 in photos:
+        cached = _HOSTED_PICTURES.get(sha256)
+        if cached:
+            urls.append(cached)
+            continue
+        path = storage.resolve(file_path)
+        content = path.read_bytes()
+        extension = path.suffix.lstrip(".") or "jpg"
+        url = await uploader(
+            content,
+            filename=f"{photo_id}.{extension}",
+            mime_type=mime_type,
+            picture_name=f"liquid-{photo_id}",
+        )
+        _HOSTED_PICTURES[sha256] = url
+        urls.append(url)
+    return urls
 
 
 class EbayPublishError(RuntimeError):
@@ -58,9 +98,14 @@ async def publish_item_to_ebay(
     title: str | None = None,
     description: str | None = None,
     aspects: dict[str, list[str]] | None = None,
+    taxonomy: EbayTaxonomyClient | None = None,
+    photo_storage: PhotoStorage | None = None,
 ) -> EbayPublishResult:
     """Create (and, when approved, publish) the eBay sandbox offer for an item.
 
+    Photos are served from PUBLIC_BASE_URL when that is a public HTTPS address; otherwise they are
+    uploaded to eBay Picture Services through the publisher, so no tunnel is required. The category
+    comes from the caller, a live Taxonomy suggestion, the configured default, or a fallback.
     Raises EbayPublishError with an HTTP-style status code so callers can map it.
     """
     with Session(engine) as session:
@@ -79,15 +124,12 @@ async def publish_item_to_ebay(
         "fulfillment policy": settings.ebay_sb_fulfillment_policy_id,
     }
     missing = [name for name, value in required_settings.items() if not value]
-    category = category_id or settings.ebay_sb_default_category_id
-    if not category:
-        missing.append("category")
     if missing:
         raise EbayPublishError(503, f"eBay sandbox setup is missing: {', '.join(missing)}")
     if not aspects:
         raise EbayPublishError(422, "at least one truthful item aspect is required")
-    public_url = urlparse(settings.public_base_url)
-    if public_url.scheme != "https" or public_url.hostname in {"localhost", "127.0.0.1"}:
+    image_base = public_image_base(settings)
+    if image_base is None and not callable(getattr(publisher, "upload_picture", None)):
         raise EbayPublishError(503, "PUBLIC_BASE_URL must be a public HTTPS URL for eBay images")
 
     with Session(engine) as session:
@@ -114,26 +156,51 @@ async def publish_item_to_ebay(
         offer_id = (
             listing.external_id if listing and listing.status == ListingStatus.DRAFT else None
         )
-        base = settings.public_base_url.rstrip("/")
-        offer = EbayOfferInput(
-            sku=f"liquid-{item.id}",
-            title=(title or item.title)[:80],
-            description=description or f"{item.title}. Seller-provided item photo.",
-            condition=CONDITION_ENUM[item.condition.value],
-            aspects=aspects,
-            image_urls=[f"{base}/api/photos/{photo.id}/file" for photo in approved_photos],
-            category_id=category or "",
-            marketplace_id=settings.ebay_marketplace_id,
-            currency=settings.ebay_currency,
-            price_cents=resolved_price,
-            merchant_location_key=settings.ebay_sb_merchant_location_key or "",
-            payment_policy_id=settings.ebay_sb_payment_policy_id or "",
-            return_policy_id=settings.ebay_sb_return_policy_id or "",
-            fulfillment_policy_id=settings.ebay_sb_fulfillment_policy_id or "",
-        )
+        item_title = item.title
+        item_condition = CONDITION_ENUM[item.condition.value]
+        item_category = str(getattr(item, "category", "") or "")
+        photo_refs = [
+            (photo.id, photo.file_path, photo.mime_type, photo.sha256)
+            for photo in approved_photos
+        ]
 
     try:
         if offer_id is None:
+            category = await resolve_category(
+                explicit=category_id,
+                query=title or item_title,
+                item_category=item_category,
+                default=settings.ebay_sb_default_category_id,
+                taxonomy=taxonomy,
+            )
+            if image_base is not None:
+                image_urls = [f"{image_base}/api/photos/{ref[0]}/file" for ref in photo_refs]
+            else:
+                storage = photo_storage or PhotoStorage(settings.photo_storage_dir)
+                try:
+                    image_urls = await host_photos_on_ebay(
+                        publisher.upload_picture,  # type: ignore[attr-defined]
+                        storage,
+                        photo_refs,
+                    )
+                except (OSError, ValueError) as exc:
+                    raise EbayPublishError(409, f"approved photo file unavailable: {exc}") from exc
+            offer = EbayOfferInput(
+                sku=f"liquid-{item_id}",
+                title=(title or item_title)[:80],
+                description=description or f"{item_title}. Seller-provided item photo.",
+                condition=item_condition,
+                aspects=aspects,
+                image_urls=image_urls,
+                category_id=category.category_id,
+                marketplace_id=settings.ebay_marketplace_id,
+                currency=settings.ebay_currency,
+                price_cents=resolved_price,
+                merchant_location_key=settings.ebay_sb_merchant_location_key or "",
+                payment_policy_id=settings.ebay_sb_payment_policy_id or "",
+                return_policy_id=settings.ebay_sb_return_policy_id or "",
+                fulfillment_policy_id=settings.ebay_sb_fulfillment_policy_id or "",
+            )
             draft = await publisher.create_draft(offer)
             offer_id = draft.offer_id
             with Session(engine) as session:

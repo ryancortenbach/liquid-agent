@@ -55,36 +55,58 @@ connection record.
 
 ## 4. eBay
 
-Create Sandbox or Production application keys in the eBay Developers Program. Configure the
-application's Accept URL as `PUBLIC_BASE_URL/oauth/ebay/callback` and save the RuName that eBay
-assigns to it.
+Liquid uses two eBay keysets, both from developer.ebay.com > Application Keys.
 
-For Sandbox, set `EBAY_ENVIRONMENT=sandbox`, `EBAY_SB_CLIENT_ID`, `EBAY_SB_CLIENT_SECRET`, and
-`EBAY_SB_RUNAME`. For Production, set `EBAY_ENVIRONMENT=production`, `EBAY_CLIENT_ID`,
-`EBAY_CLIENT_SECRET`, and `EBAY_RUNAME`. Set `APP_SECRET` to at least 32 random characters. Never
-commit any of these values.
+- **Production keyset** (`EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET`): read-only. Powers active comps
+  through the Browse API and category suggestions through the Taxonomy API. No seller login.
+- **Sandbox keyset** (`EBAY_SB_CLIENT_ID`, `EBAY_SB_CLIENT_SECRET`, `EBAY_SB_RUNAME`): publishes
+  listings as a sandbox test user (developer.ebay.com > Sandbox test users). The RuName is the
+  redirect URL name eBay assigns under User Tokens > Get a Token from eBay via Your Application.
 
-The authorization request asks only for the base, Inventory, and Account scopes. The seller signs
-in on eBay and grants access. Liquid exchanges the one-time code, encrypts the refresh token at
-rest, and associates it with the seller record. Keep `REQUIRE_EBAY_ONBOARDING=true`. On the first
-text from a new seller, Liquid sends the authorization link and blocks photos and listing work
-until the callback succeeds. The seller can text `RETRY` for a fresh link if the link expires,
-authorization is declined, or eBay returns an error. Onboarding cannot be skipped.
+Three commands take the sandbox from keys to a verified listing:
 
-1. Create developer sandbox and production keysets at `developer.ebay.com`.
-2. Create an eBay sandbox test user and redirect URL.
-3. Create a sandbox inventory location and note its merchant location key.
-4. Opt the sandbox seller into business policies, then create payment, return, and fulfillment
-   policies.
-5. Add the client id, client secret, RuName, location key, and three policy ids to `.env`. The
-   per-seller refresh token is created by the onboarding callback and is not pasted into `.env`.
-6. Set `PUBLIC_BASE_URL` to public HTTPS so eBay can fetch approved listing images.
-7. Prepare a draft with `POST /api/items/{item_id}/publish/ebay` and
-   `{"seller_approved": false, "aspects": {"Brand": ["Sony"]}}`.
-8. Publish only after review by repeating the request with `seller_approved` set to `true`.
+```bash
+uv run python scripts/ebay_authorize.py
+```
 
-Liquid stores the eBay offer id while the listing is a draft. It marks the listing live only after
-eBay returns a listing id. Production publication is not configured by this sandbox adapter.
+Sign in as the sandbox test user, approve, and paste the URL you land on. No public callback is
+needed: the script exchanges the `code` from that URL and writes `EBAY_SB_REFRESH_TOKEN` to
+`.env`. The app's publisher uses that token for every seller.
+
+```bash
+uv run python scripts/ebay_setup.py
+```
+
+Opts the seller into business policies, creates (or finds by name) the payment, return, and
+fulfillment policies and a ship-from location, and writes the four ids into `.env`. Re-runnable.
+
+```bash
+uv run python scripts/ebay_verify.py --publish
+```
+
+Checks comps, category suggestion, sandbox auth, business-policy opt-in, the three policies, and
+the location, then hosts a generated photo on eBay Picture Services, creates a draft offer,
+publishes it, reprices it, withdraws it, and deletes it. Prints PASS/FAIL per step and exits
+non-zero on any failure. Drop `--publish` for a read-only check, or use `--draft` to stop at the
+draft.
+
+Photos: at publish time Liquid uploads approved photos to eBay Picture Services, so
+`PUBLIC_BASE_URL` can stay on localhost. When `PUBLIC_BASE_URL` is a public HTTPS address, eBay
+fetches them from `/api/photos/{id}/file` instead.
+
+Category: an explicit `category_id`, else a live Taxonomy suggestion for the title (production
+keyset), else `EBAY_SB_DEFAULT_CATEGORY_ID`, else a leaf category for the identifier's item kind.
+
+Per-seller connections (`CONNECT EBAY` in iMessage, `/oauth/ebay/callback`) still work when
+`APP_SECRET` and the RuName are set and `PUBLIC_BASE_URL` is public; a seller's own connection
+takes precedence over the `.env` token. `REQUIRE_EBAY_ONBOARDING` gates intake only when a
+per-seller connection is the sole way to publish.
+
+API path: `POST /api/items/{item_id}/publish/ebay` with
+`{"seller_approved": false, "aspects": {"Brand": ["Sony"]}}` prepares a draft; repeat with
+`seller_approved` true to publish. Liquid stores the offer id while drafting and marks the listing
+live only after eBay returns a listing id. Repricing uses `bulkUpdatePriceQuantity` on the live
+offer.
 
 ## 5. Facebook Marketplace
 
