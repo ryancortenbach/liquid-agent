@@ -23,11 +23,16 @@ STOPWORDS = {
     "item", "from", "imessage", "by", "sunday", "monday", "tuesday", "wednesday", "thursday",
     "friday", "saturday", "week", "day", "days", "please",
 }
+# Listings that are never a comp for the item itself.
 NEGATIVE_PHRASES = (
     "for parts", "parts only", "not working", "broken", "cracked", "damaged", "read description",
+    "box only", "empty box", "lot of", "bundle of", "replacement", "repair", "icloud locked",
+    "activation lock",
+)
+# Accessory listings: excluded when pricing a main product, kept when the item IS an accessory.
+ACCESSORY_PHRASES = (
     "case", "cover", "sleeve", "skin", "screen protector", "charger", "cable", "adapter",
-    "stand", "keyboard", "pencil", "mount", "box only", "empty box", "lot of", "bundle of",
-    "replacement", "repair", "icloud locked", "activation lock",
+    "stand", "keyboard", "pencil", "mount",
 )
 SOLD_HAIRCUT = 0.92
 MIN_GROUP = 5
@@ -82,9 +87,16 @@ def build_query(item: Item) -> str:
     return " ".join(seen[:8]) or item.title
 
 
-def is_relevant(record: CompRecord, tokens: set[str]) -> bool:
+def is_accessory_query(query: str) -> bool:
+    lowered = query.lower()
+    return any(phrase in lowered for phrase in ACCESSORY_PHRASES)
+
+
+def is_relevant(record: CompRecord, tokens: set[str], *, accessory: bool = False) -> bool:
     title = record.title.lower()
     if any(phrase in title for phrase in NEGATIVE_PHRASES):
+        return False
+    if not accessory and any(phrase in title for phrase in ACCESSORY_PHRASES):
         return False
     required = core_tokens(tokens)
     if not required:
@@ -109,15 +121,23 @@ def _sigma(prices: list[int], market: int) -> int:
     return max(int(1.4826 * mad), floor)
 
 
+PRIOR_BAND = 4  # comps outside [prior/4, prior*4] are a different product, a lot, or a bundle
+
+
 def analyze(
     query: str,
     records: list[CompRecord],
     *,
     provisional_cents: int | None = None,
+    prior_cents: int | None = None,
     haircut: float = SOLD_HAIRCUT,
 ) -> CompsSummary:
     tokens = query_tokens(query)
-    relevant = [record for record in records if is_relevant(record, tokens)]
+    accessory = is_accessory_query(query)
+    relevant = [record for record in records if is_relevant(record, tokens, accessory=accessory)]
+    if prior_cents:
+        low, high = prior_cents // PRIOR_BAND, prior_cents * PRIOR_BAND
+        relevant = [record for record in relevant if low <= record.price_cents <= high]
     sold = _trim_outliers([r for r in relevant if r.kind == "sold"])
     active = _trim_outliers([r for r in relevant if r.kind == "active"])
     sold_prices = [r.price_cents for r in sold]
@@ -132,11 +152,15 @@ def analyze(
     elif sold_median is not None or active_median is not None:
         market = sold_median or int((active_median or 0) * haircut)
         basis, spread_prices = "thin", sold_prices or active_prices
+    elif prior_cents:
+        market, basis, spread_prices = prior_cents, "prior", []
     else:
         market = max(int(provisional_cents or 0), 2_000)
         basis, spread_prices = "provisional", []
     market = max(market, 100)
     sigma = _sigma(spread_prices, market)
+    if basis == "prior":
+        sigma = max(int(market * 0.25), sigma)
 
     ordered = sorted(sold, key=lambda r: r.sold_at or "", reverse=True) + active
     sources = [record.to_source() for record in ordered if record.url][:MAX_SOURCES]
@@ -188,10 +212,12 @@ async def research_item(
             raise LookupError("item not found")
         query = build_query(item)
         provisional = item.market_value_cents
+        prior_info = item.constraints_json.get("price_prior") or {}
+        prior = int(prior_info.get("cents") or 0) or None
         category = item.category
 
     records = await gather_comps(query, sources, max_results=max_results)
-    summary = analyze(query, records, provisional_cents=provisional)
+    summary = analyze(query, records, provisional_cents=provisional, prior_cents=prior)
 
     with Session(engine) as session:
         item = session.get(Item, item_id)

@@ -23,10 +23,12 @@ from app.inbound.identify import (
     apply_identity,
     crop_inventory_item,
     interpret_confirmation,
+    price_prior_cents,
 )
 from app.intake.details import QUESTION_SETS, IntakeDetails
 from app.intake.item_guard import extract_separate_item_requests
 from app.ledger import write_decision
+from app.market.fees import instant_quote_cents
 from app.models import (
     ConditionGrade,
     ConversationStatus,
@@ -47,6 +49,7 @@ from app.photos.pipeline import PhotoPipelineError, enhance_product_photo
 from app.photos.reviewer import PhotoTruthReviewer
 from app.photos.storage import PhotoStorage
 
+PLACEHOLDER_VALUE_CENTS = 2_000  # $20: replaced by the identifier's price prior
 APPROVE_WORDS = {"approve", "approved", "yes", "use it", "looks good"}
 REJECT_WORDS = {"reject", "no", "do not use", "don't use it"}
 BATCH_PATTERN = re.compile(r"^(?:batch|multiple items?)\b", flags=re.IGNORECASE)
@@ -580,7 +583,9 @@ class SellerMessageRouter:
         floor_cents = parse_floor_cents(text)
         deadline_at = parse_deadline(text, now, self.timezone)
         horizon = max((deadline_at - now).total_seconds() / 3600, 1)
-        provisional_value = max(int(floor_cents * 1.2), 10_000)
+        # A brand-new item has no market value yet. A seller-stated floor gives a hint; otherwise
+        # keep a small placeholder that identification replaces with a real price prior.
+        provisional_value = int(floor_cents * 1.2) if floor_cents else PLACEHOLDER_VALUE_CENTS
         item = Item(
             seller_id=conversation.seller_id,
             title=parse_title(text),
@@ -596,6 +601,7 @@ class SellerMessageRouter:
                 "original_caption": text,
                 "needs_identification": parse_title(text) == "Item from iMessage",
                 "needs_market_data": True,
+                "market_value_source": "floor" if floor_cents else "placeholder",
             },
             market_value_cents=provisional_value,
             sigma_cents=max(int(provisional_value * 0.12), 1),
@@ -900,7 +906,20 @@ class SellerMessageRouter:
         if identity.condition_guess in {"A", "B", "C"}:
             item.condition = ConditionGrade(identity.condition_guess)
         item.confidence = identity.confidence
-        item.constraints_json = apply_identity(item.constraints_json, identity)
+        constraints = apply_identity(item.constraints_json, identity)
+        prior = price_prior_cents(identity)
+        # Until comps arrive, the identifier's price estimate is a far better market value than
+        # a placeholder or a floor guess. Comps research overwrites it later when listings exist.
+        if prior and constraints.get("market_value_source", "placeholder") in {
+            "placeholder",
+            "floor",
+            "prior",
+        }:
+            item.market_value_cents = prior
+            item.sigma_cents = max(int(prior * 0.25), 100)
+            item.instant_quote_cents = instant_quote_cents(prior, item.category)
+            constraints["market_value_source"] = "prior"
+        item.constraints_json = constraints
 
     async def _load_pending_attachment(self, pending: dict) -> bytes:
         if pending.get("file_path"):

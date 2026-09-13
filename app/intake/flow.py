@@ -430,7 +430,7 @@ class ListingFlow:
         ]
         if research is not None:
             basis = ""
-            if research.basis == "provisional":
+            if research.basis in {"provisional", "prior"}:
                 basis = " (estimate, no close matches)"
             elif research.sources_json and research.sources_json[0].get("source") == "fixture":
                 basis = " (sample data)"
