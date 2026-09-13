@@ -116,7 +116,7 @@ def send_photos(client: TestClient, guid: str, text: str, count: int) -> None:
 
 def test_question_and_confirmation_parsing() -> None:
     question = IDENTITY.question()
-    assert question.startswith("looks like Apple iPad Air 5th gen (M1) 64GB Wi-Fi. is that right?")
+    assert question.startswith("this the Apple iPad Air 5th gen (M1) 64GB Wi-Fi?")
     assert "2) Apple iPad Air 4th gen 64GB Wi-Fi" in question
     assert interpret_confirmation("yes", IDENTITY) == ("yes", IDENTITY.title)
     assert interpret_confirmation("2", IDENTITY) == (
@@ -226,7 +226,7 @@ def test_identify_then_confirm_then_enhance(tmp_path: Path) -> None:
     with TestClient(app) as client:
         send(client, "m1", "sell this by sunday", with_photo=True)
         assert identifier.calls == 1
-        assert adapter.sent_texts[-1].startswith("looks like Apple iPad Air 5th gen")
+        assert adapter.sent_texts[-1].startswith("this the Apple iPad Air 5th gen")
         with Session(app.state.engine) as session:
             conversation = session.exec(select(SellerConversation)).one()
             assert conversation.status == ConversationStatus.AWAITING_IDENTITY
@@ -235,7 +235,7 @@ def test_identify_then_confirm_then_enhance(tmp_path: Path) -> None:
             assert item.constraints_json["needs_identification"] is False
 
         send(client, "m2", "yes")  # 'yes' must confirm identity, not approve a photo
-        assert any(text.startswith("Original first") for text in adapter.sent_texts)
+        assert any(text.startswith("cleaned it up") for text in adapter.sent_texts)
         assert len(adapter.sent_images) == 2
         with Session(app.state.engine) as session:
             conversation = session.exec(select(SellerConversation)).one()
@@ -244,7 +244,7 @@ def test_identify_then_confirm_then_enhance(tmp_path: Path) -> None:
             assert actions[:3] == ["intake", "identify", "confirm_identity"]
 
         send(client, "m3", "APPROVE")
-        assert adapter.sent_texts[-1].startswith("two quick things")
+        assert adapter.sent_texts[-1].startswith("condition?")
 
 
 def test_named_correction_and_no_editor_fallback(tmp_path: Path) -> None:
@@ -255,8 +255,8 @@ def test_named_correction_and_no_editor_fallback(tmp_path: Path) -> None:
     with TestClient(app) as client:
         send(client, "m1", "", with_photo=True)
         send(client, "m2", "no, it's the ipad air 4th gen 64gb")
-        assert any("photo cleanup is off" in text for text in adapter.sent_texts)
-        assert adapter.sent_texts[-1].startswith("two quick things")
+        assert any(text.startswith("got it") for text in adapter.sent_texts)
+        assert adapter.sent_texts[-1].startswith("condition?")
         with Session(app.state.engine) as session:
             item = session.exec(select(Item)).one()
             assert item.title == "the ipad air 4th gen 64gb"
@@ -277,11 +277,11 @@ def test_multiple_photos_stay_with_one_item_and_review_together(tmp_path: Path) 
     )
     with TestClient(app) as client:
         send_photos(client, "multi-1", "sell this by sunday", 3)
-        assert adapter.sent_texts[-1].endswith("all 3 photos as angles of this item.")
+        assert adapter.sent_texts[-1].endswith("(using all 3 photos)")
 
         send(client, "multi-2", "yes")
         assert len(adapter.sent_images) == 6
-        assert "3 original and enhanced pairs" in adapter.sent_texts[-1]
+        assert "use the new ones?" in adapter.sent_texts[-1]
 
         send(client, "multi-3", "approve")
         with Session(app.state.engine) as session:
@@ -309,7 +309,7 @@ def test_batch_creates_separate_items_and_accepts_numbered_correction(tmp_path: 
     )
     with TestClient(app) as client:
         send_photos(client, "batch-1", "BATCH 2+1 sell these by sunday", 3)
-        assert "I found 2 items" in adapter.sent_texts[-1]
+        assert adapter.sent_texts[-1].startswith("2 items:")
         assert "1. Apple iPad Air" in adapter.sent_texts[-1]
         assert "(2 photos)" in adapter.sent_texts[-1]
         assert "2. Sony WH-1000XM5" in adapter.sent_texts[-1]
@@ -338,7 +338,7 @@ def test_one_inventory_photo_becomes_separate_confirmed_items(tmp_path: Path) ->
     )
     with TestClient(app) as client:
         send(client, "inventory-1", "sell everything here by sunday", with_photo=True)
-        assert "I found 2 sellable items" in adapter.sent_texts[-1]
+        assert adapter.sent_texts[-1].startswith("i see 2 things to sell")
         assert "1. Apple iPad Air" in adapter.sent_texts[-1]
         assert "2. Sony WH-1000XM5" in adapter.sent_texts[-1]
 
@@ -364,7 +364,7 @@ def test_inventory_checklist_can_remove_an_unwanted_item(tmp_path: Path) -> None
     with TestClient(app) as client:
         send(client, "remove-1", "sell the things on this table", with_photo=True)
         send(client, "remove-2", "remove 2")
-        assert "Removed." in adapter.sent_texts[-1]
+        assert "removed." in adapter.sent_texts[-1]
         assert "Sony" not in adapter.sent_texts[-1]
         send(client, "remove-3", "yes")
         assert len(adapter.sent_images) == 2
@@ -444,7 +444,7 @@ def test_identify_endpoint_returns_identity_and_applies_to_item(tmp_path: Path) 
         )
         assert response.status_code == 200
         body = response.json()
-        assert body["title"] == IDENTITY.title and body["question"].startswith("looks like")
+        assert body["title"] == IDENTITY.title and body["question"].startswith("this the")
 
         item_id = client.post(
             "/api/items",

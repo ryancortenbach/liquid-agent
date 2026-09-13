@@ -177,7 +177,7 @@ def test_imessage_photo_preview_approval_and_deduplication(tmp_path: Path) -> No
         assert response.status_code == 202
         assert response.json()["status"] == "queued"
         assert len(adapter.sent_images) == 2
-        assert "Reply APPROVE or REJECT" in adapter.sent_texts[-1]
+        assert "use the new one?" in adapter.sent_texts[-1]
 
         with Session(app.state.engine) as session:
             item = session.exec(select(Item)).one()
@@ -215,11 +215,9 @@ def test_imessage_photo_preview_approval_and_deduplication(tmp_path: Path) -> No
             json=message_payload(guid="message-2", text="APPROVE"),
         )
         assert approval.json()["status"] == "queued"
-        approved_index = next(
-            index for index, text in enumerate(adapter.sent_texts) if text.startswith("Approved")
-        )
-        # the listing flow asks its first question right after the photo review
-        assert adapter.sent_texts[approved_index + 1].startswith("two quick things")
+        # no acknowledgment chatter: the listing flow's first question follows the approval
+        assert not any(text.startswith("Approved") for text in adapter.sent_texts)
+        assert adapter.sent_texts[-1].startswith("condition?")
 
         with Session(app.state.engine) as session:
             assert session.get(ProductPhoto, enhanced_id).status == PhotoStatus.APPROVED
@@ -277,7 +275,7 @@ def test_first_message_requires_ebay_and_blocks_photos_until_connected(tmp_path:
             json=message_payload(guid="connect-1", text="hello"),
         )
         assert first.json()["status"] == "queued"
-        assert adapter.sent_texts[-1].startswith("Welcome to Liquid")
+        assert adapter.sent_texts[-1].startswith("hey! first, connect your ebay")
         assert "auth.sandbox.ebay.com" in adapter.sent_texts[-1]
 
         blocked = client.post(
@@ -285,7 +283,7 @@ def test_first_message_requires_ebay_and_blocks_photos_until_connected(tmp_path:
             json=message_payload(guid="connect-2", text="sell this", with_photo=True),
         )
         assert blocked.json()["status"] == "queued"
-        assert adapter.sent_texts[-1].startswith("I cannot process that photo")
+        assert adapter.sent_texts[-1].startswith("hold that photo")
         with Session(app.state.engine) as session:
             assert session.exec(select(Item)).all() == []
             conversation = session.exec(select(SellerConversation)).one()
@@ -304,7 +302,7 @@ def test_first_message_requires_ebay_and_blocks_photos_until_connected(tmp_path:
             json=message_payload(guid="connect-3", text="STATUS"),
         )
         assert retry.json()["status"] == "queued"
-        assert adapter.sent_texts[-1].startswith("No active item")
+        assert adapter.sent_texts[-1].startswith("nothing in progress")
         with Session(app.state.engine) as session:
             assert session.exec(select(SellerConversation)).one().status == ConversationStatus.READY
 
@@ -333,9 +331,9 @@ def test_unconnected_seller_can_retry_or_check_but_not_skip(tmp_path: Path) -> N
                 json=message_payload(guid=guid, text=text),
             )
             assert response.json()["status"] == "queued"
-        assert adapter.sent_texts[-3].startswith("Here is a fresh eBay connection link")
-        assert adapter.sent_texts[-2].startswith("I do not see a completed eBay connection")
-        assert adapter.sent_texts[-1].startswith("An eBay seller account is required")
+        assert adapter.sent_texts[-3].startswith("fresh link")
+        assert adapter.sent_texts[-2].startswith("not connected yet")
+        assert adapter.sent_texts[-1].startswith("can't skip this one")
 
 
 def test_shared_ebay_publisher_does_not_bypass_seller_onboarding(tmp_path: Path) -> None:
@@ -362,7 +360,7 @@ def test_shared_ebay_publisher_does_not_bypass_seller_onboarding(tmp_path: Path)
         )
 
         assert response.json()["status"] == "queued"
-        assert adapter.sent_texts[-1].startswith("Welcome to Liquid")
+        assert adapter.sent_texts[-1].startswith("hey! first, connect your ebay")
 
 
 def test_ebay_callback_recovers_from_decline_and_completes_on_retry(tmp_path: Path) -> None:
@@ -396,20 +394,20 @@ def test_ebay_callback_recovers_from_decline_and_completes_on_retry(tmp_path: Pa
             params={"state": seller_id, "error": "access_denied"},
         )
         assert declined.status_code == 400
-        assert adapter.sent_texts[-1] == "eBay was not connected. Reply RETRY for a fresh link."
+        assert adapter.sent_texts[-1] == "ebay didn't connect. reply retry for a new link."
 
         client.post(
             "/webhooks/bluebubbles?secret=webhook-secret",
             json=message_payload(guid="callback-2", text="retry"),
         )
-        assert adapter.sent_texts[-1].startswith("Here is a fresh eBay connection link")
+        assert adapter.sent_texts[-1].startswith("fresh link")
 
         completed = client.get(
             "/oauth/ebay/callback",
             params={"state": seller_id, "code": "authorization-code"},
         )
         assert completed.status_code == 200
-        assert adapter.sent_texts[-1].startswith("eBay connected. Setup is complete")
+        assert adapter.sent_texts[-1].startswith("ebay connected")
         with Session(app.state.engine) as session:
             assert session.exec(select(EbayConnection)).one().seller_id == seller_id
             assert session.exec(select(SellerConversation)).one().status == ConversationStatus.READY
@@ -439,8 +437,8 @@ def test_wildcard_seller_handle_accepts_multiple_sellers(tmp_path: Path) -> None
             )
             assert response.json()["status"] == "queued"
         assert adapter.sent_texts == [
-            "No active item. Send a product photo to start.",
-            "No active item. Send a product photo to start.",
+            "nothing in progress. send a photo to start.",
+            "nothing in progress. send a photo to start.",
         ]
 
 
@@ -473,7 +471,7 @@ def test_start_over_cancels_active_draft_and_resets_conversation(tmp_path: Path)
             "/webhooks/bluebubbles?secret=webhook-secret",
             json=message_payload(guid="reset-2", text="START OVER"),
         )
-        assert adapter.sent_texts[-1].startswith("Started over")
+        assert adapter.sent_texts[-1].startswith("fresh start")
         with Session(app.state.engine) as session:
             assert session.exec(select(Item)).one().status == ItemStatus.CANCELLED
             conversation = session.exec(select(SellerConversation)).one()
@@ -595,7 +593,7 @@ def test_ai_status_intent_does_not_get_consumed_as_listing_details(tmp_path: Pat
             json=message_payload(guid="ai-status-3", text="Where are we with that?"),
         )
 
-        assert "Current step: awaiting_details" in adapter.sent_texts[-1]
+        assert "waiting on your last answer" in adapter.sent_texts[-1]
         with Session(app.state.engine) as session:
             conversation = session.exec(select(SellerConversation)).one()
             item = session.exec(select(Item)).one()

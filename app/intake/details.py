@@ -178,19 +178,14 @@ def apply_defaults(details: IntakeDetails) -> IntakeDetails:
     return details
 
 
+# Only what a truthful, well-priced listing needs. Floor, shipping, and platforms default
+# (you decide / both / everywhere) and can be changed in any reply, e.g. "not under 200".
 QUESTION_SETS: dict[str, str] = {
     "condition": (
-        "two quick things.\n"
-        "condition? 1 like new · 2 good, light wear · 3 fair, visible marks · 4 broken\n"
-        "and what's included or anything a buyer should know? (box, charger, scratches) "
-        "or 'just the item'"
+        "condition? 1 like new · 2 good · 3 fair · 4 broken\n"
+        "anything included or wrong with it?"
     ),
-    "plan": (
-        "last three.\n"
-        "how fast? 1 day · 3 days · week · month · hold\n"
-        "lowest you'd take? a number, or 'you decide'\n"
-        "ship, local pickup, or both? and where: all (ebay + facebook + offerup), or pick"
-    ),
+    "plan": "how fast do you want it gone? 1 day · 3 days · week · month",
 }
 
 

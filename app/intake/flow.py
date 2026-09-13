@@ -212,14 +212,14 @@ class ListingFlow:
                 return True
             await self._send(
                 chat_guid,
-                f"on it. pulling sold and active listings and pricing it for {details.horizon}.",
+                "on it, checking what these actually sell for.",
                 f"{key}:researching",
             )
             await self.plan(item_id, research=True, chat_guid=chat_guid, key=key)
             return True
 
         if status == ConversationStatus.RESEARCHING:
-            await self._send(chat_guid, "still building the plan, one moment.", f"{key}:wait")
+            await self._send(chat_guid, "still on it, one sec.", f"{key}:wait")
             return True
 
         if status == ConversationStatus.AWAITING_CONFIRMATION:
@@ -242,7 +242,7 @@ class ListingFlow:
                     session.commit()
                 await self._send(
                     chat_guid,
-                    "cancelled. send a photo whenever you want to list something.",
+                    "cancelled. send a photo anytime.",
                     f"{key}:cancelled",
                 )
                 return True
@@ -250,8 +250,7 @@ class ListingFlow:
             if updated.as_dict() == {**details.as_dict(), "answered_sets": updated.answered_sets}:
                 await self._send(
                     chat_guid,
-                    "reply go to publish, or tell me what to change: a floor like 'floor 250', "
-                    "a speed like '1 day', or where to list like 'ebay only'.",
+                    "reply go, or change anything (floor 250, 1 day, ebay only).",
                     f"{key}:hint",
                 )
                 return True
@@ -261,12 +260,12 @@ class ListingFlow:
                 self._save_details(item, apply_defaults(updated), asked)
                 session.add(item)
                 session.commit()
-            await self._send(chat_guid, "updating the plan.", f"{key}:updating")
+            await self._send(chat_guid, "updating.", f"{key}:updating")
             await self.plan(item_id, research=False, chat_guid=chat_guid, key=key)
             return True
 
         if status == ConversationStatus.PUBLISHING:
-            await self._send(chat_guid, "publishing now, one moment.", f"{key}:publishing")
+            await self._send(chat_guid, "posting it now.", f"{key}:publishing")
             return True
 
         if status == ConversationStatus.LISTED:
@@ -406,36 +405,29 @@ class ListingFlow:
         schedule: PriceSchedule,
         draft: ListingDraft,
     ) -> str:
+        platforms = " + ".join(details.platforms or ["ebay"])
         lines = [
             "here's the plan",
             draft.title,
-            f"condition: {CONDITION_LABEL.get(details.condition or 'B', 'good')}",
             f"price: {describe_schedule(schedule)}",
-            f"listing on: {', '.join(details.platforms or ['ebay'])}",
+            f"condition: {CONDITION_LABEL.get(details.condition or 'B', 'good')} · {platforms}",
         ]
         if research is not None:
             basis = ""
             if research.basis == "provisional":
-                basis = " (no matching listings found, so this is an estimate)"
+                basis = " (estimate, no close matches)"
             elif research.sources_json and research.sources_json[0].get("source") == "fixture":
-                basis = " (offline sample data, not live listings)"
+                basis = " (sample data)"
             sold = (
-                f"{research.sold_n} sold (median {dollars(research.sold_median_cents)})"
+                f"{research.sold_n} sold at ~{dollars(research.sold_median_cents)}"
                 if research.sold_median_cents
                 else "0 sold"
             )
-            active = (
-                f"{research.active_n} active (median {dollars(research.active_median_cents)})"
-                if research.active_median_cents
-                else "0 active"
-            )
-            lines.append(f"based on {sold} and {active} listings{basis}")
-            urls = [source["url"] for source in research.sources_json if source.get("url")][:3]
-            if urls:
-                lines.append("sources: " + " ".join(urls))
-        if schedule.instant_cents:
-            lines.append(f"guaranteed-now reference: about {dollars(schedule.instant_cents)}")
-        lines.append("reply go to publish, or tell me what to change (floor 250, 1 day, ebay only)")
+            active = f"{research.active_n} active"
+            urls = [source["url"] for source in research.sources_json if source.get("url")][:1]
+            proof = f" e.g. {urls[0]}" if urls else ""
+            lines.append(f"based on {sold}, {active}{basis}{proof}")
+        lines.append("reply go, or change anything (floor 250, 1 day, ebay only)")
         return "\n".join(lines)
 
     # ---------- publishing ----------
@@ -524,10 +516,7 @@ class ListingFlow:
                         "listing_id": result.listing_id,
                         "url": listing_url,
                     }
-                    environment_label = (
-                        " (sandbox)" if self.settings.ebay_environment == "sandbox" else ""
-                    )
-                    messages.append(f"listed on ebay{environment_label}: {listing_url}")
+                    messages.append(f"ebay: {listing_url}")
                     if listing_url:
                         published_links.append(listing_url)
                 except EbayPublishError as exc:
@@ -539,10 +528,7 @@ class ListingFlow:
                         session.add(pack)
                         session.commit()
                     outcomes["ebay"] = {"status": "failed", "reason": exc.detail}
-                    messages.append(
-                        f"ebay: {exc.detail}. the listing pack is saved and will publish once "
-                        "the sandbox is configured."
-                    )
+                    messages.append(f"ebay didn't go through ({exc.detail}). saved, will retry.")
                 continue
             handoffs = build_handoffs(
                 handoff_root=Path(self.settings.handoff_dir),
@@ -605,7 +591,7 @@ class ListingFlow:
             )
             session.commit()
         if any(value["status"] == "handoff_ready" for value in outcomes.values()):
-            messages.append("for facebook and offerup, paste the messages above into the apps.")
+            messages.append("facebook + offerup: paste the messages above into the apps.")
         if published_links and self.email_notifier is not None:
             email_text = "Your listing is live:\n" + "\n".join(published_links)
             try:
@@ -618,7 +604,7 @@ class ListingFlow:
             handle, title, position, total = next_batch
             await self._send(
                 chat_guid,
-                f"Item {position - 1} is done. Next is item {position} of {total}: {title}.",
+                f"done. next up ({position} of {total}): {title}",
                 f"{key}:batch-next",
             )
             await self.start_details(handle=handle, chat_guid=chat_guid or "", key=f"{key}:batch")
@@ -626,12 +612,12 @@ class ListingFlow:
 
     @staticmethod
     def listed_summary(packs: list[ListingPack]) -> str:
-        lines = ["it's listed. send a new photo to list something else."]
+        lines = ["it's listed. send another photo whenever."]
         for pack in packs:
             if pack.external_url:
                 lines.append(f"{pack.channel}: {pack.external_url}")
             elif pack.status == ListingPackStatus.HANDOFF_READY:
-                lines.append(f"{pack.channel}: pasted by you from the message i sent")
+                lines.append(f"{pack.channel}: paste the copy i sent")
             elif pack.status == ListingPackStatus.FAILED:
                 lines.append(f"{pack.channel}: not published ({pack.failure_reason})")
         return "\n".join(lines)
