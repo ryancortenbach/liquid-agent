@@ -1,4 +1,7 @@
-"""Check the comps sources with the configured keys: `uv run python scripts/smoke_research.py "iPad Air 5th gen 64GB"`."""
+"""Check the comps sources with the configured keys.
+
+    uv run python scripts/smoke_research.py "iPad Air 5th gen 64GB"
+"""
 
 from __future__ import annotations
 

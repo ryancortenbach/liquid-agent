@@ -34,7 +34,9 @@ def main() -> int:
     parser.add_argument("--brand", default="Apple")
     parser.add_argument("--floor", type=int, default=22_000, help="cents")
     parser.add_argument("--deadline-hours", type=float, default=72)
-    parser.add_argument("--details", default="2, comes with the box and charger, small scratch on the back")
+    parser.add_argument(
+        "--details", default="2, comes with the box and charger, small scratch on the back"
+    )
     parser.add_argument("--plan", default="3 days, not under 220, both 94110, all")
     parser.add_argument("--skip-hours", type=float, default=30)
     parser.add_argument("--no-go", action="store_true")
@@ -81,7 +83,8 @@ def main() -> int:
         step("details 1", client.post(f"/api/items/{item_id}/details", json={"text": args.details}))
         step("details 2", client.post(f"/api/items/{item_id}/details", json={"text": args.plan}))
         plan = step(
-            "plan listing", client.post(f"/api/items/{item_id}/plan-listing", json={"research": True})
+            "plan listing",
+            client.post(f"/api/items/{item_id}/plan-listing", json={"research": True}),
         )
         print(plan.get("card_text", ""))
         if args.no_go:
@@ -94,8 +97,11 @@ def main() -> int:
             print(json.dumps(reprice, indent=2))
         packs = step("packs", client.get(f"/api/items/{item_id}/packs"))
         for pack in packs.get("data", []):
-            print(f"    {pack['channel']:<10} {pack['status']:<14} ${pack['price_cents'] / 100:.0f}",
-                  pack.get("external_url") or pack.get("handoff_path") or pack.get("failure_reason"))
+            where = (
+                pack.get("external_url") or pack.get("handoff_path") or pack.get("failure_reason")
+            )
+            price = f"${pack['price_cents'] / 100:.0f}"
+            print(f"    {pack['channel']:<10} {pack['status']:<14} {price:>6}", where)
     return 0
 
 
