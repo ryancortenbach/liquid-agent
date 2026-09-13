@@ -129,3 +129,55 @@ def test_named_correction_and_no_editor_fallback(tmp_path: Path) -> None:
             assert len(photos) == 1 and photos[0].role.value == "original"
             conversation = session.exec(select(SellerConversation)).one()
             assert conversation.status == ConversationStatus.AWAITING_DETAILS
+
+
+def test_openai_identifier_parses_and_normalizes(tmp_path: Path) -> None:
+    import asyncio
+
+    from app.inbound.identify import OpenAIIdentifier
+
+    class FakeParsed:
+        output_parsed = ItemIdentity(
+            title="Apple iPad Air (5th generation) 64GB",
+            brand="Apple",
+            category="Tablet",
+            condition_guess="good",
+            confidence=0.68,
+        )
+
+    class FakeResponses:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def parse(self, **kwargs):
+            self.calls.append(kwargs)
+            return FakeParsed()
+
+    class FakeClient:
+        responses = FakeResponses()
+
+    from io import BytesIO
+
+    from PIL import Image
+
+    buffer = BytesIO()
+    Image.new("RGB", (40, 30), (10, 20, 30)).save(buffer, format="JPEG")
+    identifier = OpenAIIdentifier("key", model="gpt-5.1", client=FakeClient())
+    identity = asyncio.run(identifier.identify(buffer.getvalue(), "image/jpeg", "ipad"))
+    assert identity.category == "tablet" and identity.condition_guess == "B"
+    call = FakeClient.responses.calls[0]
+    assert call["model"] == "gpt-5.1" and call["reasoning"] == {"effort": "low"}
+    assert call["input"][0]["content"][1]["image_url"].startswith("data:image/jpeg;base64,")
+    assert call["text_format"] is ItemIdentity
+
+    class BrokenClient:
+        class responses:  # noqa: N801
+            @staticmethod
+            async def parse(**kwargs):
+                raise RuntimeError("boom")
+
+    fallback = OpenAIIdentifier("key", client=BrokenClient())
+    identity = asyncio.run(
+        fallback.identify(buffer.getvalue(), "image/jpeg", "Sony WH-1000XM5 headphones")
+    )
+    assert identity.title == "Sony WH-1000XM5 headphones" and identity.confidence == 0.5
