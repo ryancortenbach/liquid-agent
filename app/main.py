@@ -72,6 +72,7 @@ from app.photos.pipeline import (
     PhotoItemNotFound,
     enhance_product_photo,
 )
+from app.photos.reviewer import OpenAIPhotoTruthReviewer, PhotoTruthReviewer
 from app.photos.storage import MAX_PHOTO_BYTES, PhotoStorage
 from app.pricing.loop import reprice_loop
 from app.pricing.repricer import reprice_item
@@ -187,6 +188,7 @@ def create_app(
     ebay_publisher: EbayPublisher | None = None,
     ebay_connection_service: EbayConnectionService | None = None,
     identifier: Identifier | None = None,
+    photo_reviewer: PhotoTruthReviewer | None = None,
 ) -> FastAPI:
     app_settings = settings or get_settings()
 
@@ -204,6 +206,16 @@ def create_app(
                 model=app_settings.openai_image_model,
                 quality=app_settings.openai_image_quality,
                 size=app_settings.openai_image_size,
+            )
+        app.state.photo_reviewer = photo_reviewer
+        if (
+            app.state.photo_reviewer is None
+            and app_settings.openai_api_key
+            and app_settings.openai_truth_check
+        ):
+            app.state.photo_reviewer = OpenAIPhotoTruthReviewer(
+                app_settings.openai_api_key,
+                model=app_settings.openai_vision_model,
             )
         app.state.message_adapter = message_adapter
         app.state.owns_message_adapter = False
@@ -270,6 +282,7 @@ def create_app(
                     else None
                 ),
                 identifier=app.state.identifier,
+                reviewer=app.state.photo_reviewer,
             )
         app.state.ebay_publisher = ebay_publisher
         app.state.owns_ebay_publisher = False
@@ -722,6 +735,7 @@ def create_app(
                 preset=preset,
                 editor=editor,
                 storage=storage,
+                reviewer=request.app.state.photo_reviewer,
             )
         except PhotoItemNotFound as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

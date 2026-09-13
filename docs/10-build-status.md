@@ -11,6 +11,7 @@ Updated 2026-09-13.
 - Local HEIC decoding and EXIF orientation normalization for iPhone photos
 - Generated photo records containing the source link, hash, model, prompt, preset, and disclosure
 - Mandatory seller review before an enhanced image can join the listing image set
+- Automated original-versus-generated truth check that blocks changed products or hidden defects
 - Authenticated BlueBubbles webhook with sender allowlisting and event deduplication
 - Complete iMessage photo intake, OpenAI product identification, enhancement preview, approval,
   rejection, and status flow
@@ -22,12 +23,11 @@ Updated 2026-09-13.
 
 ## Ordered P0 queue
 
-1. Add automated comparison checks between original and generated images.
-2. Complete a live BlueBubbles and OpenAI smoke test after credentials are configured.
-3. Complete a live eBay sandbox smoke test after seller policies are configured.
-4. Build the assisted Facebook Marketplace publication flow.
-5. Add the outbox delivery worker and restart tests.
-6. Build the demo dashboard and recorded scenario.
+1. Complete a live BlueBubbles and OpenAI smoke test after credentials are configured.
+2. Complete a live eBay sandbox smoke test after seller policies are configured.
+3. Build the assisted Facebook Marketplace publication flow.
+4. Add the outbox delivery worker and restart tests.
+5. Build the demo dashboard and recorded scenario.
 
 ## Local setup blockers
 

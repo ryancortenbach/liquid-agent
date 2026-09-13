@@ -34,6 +34,7 @@ from app.models import (
 )
 from app.photos.editor import PhotoPreset, ProductPhotoEditor
 from app.photos.pipeline import PhotoPipelineError, enhance_product_photo
+from app.photos.reviewer import PhotoTruthReviewer
 from app.photos.storage import PhotoStorage
 
 APPROVE_WORDS = {"approve", "approved", "yes", "use it", "looks good"}
@@ -121,6 +122,7 @@ class SellerMessageRouter:
         timezone: str,
         ebay_authorization_url: Callable[[str], str] | None = None,
         identifier: Identifier | None = None,
+        reviewer: PhotoTruthReviewer | None = None,
     ) -> None:
         self.engine = engine
         self.clock = clock
@@ -133,6 +135,7 @@ class SellerMessageRouter:
         self.timezone = timezone
         self.ebay_authorization_url = ebay_authorization_url
         self.identifier = identifier
+        self.reviewer = reviewer
 
     def accepts(self, message: InboundMessage) -> bool:
         return self.seller_handle is None or canonical_handle(message.handle) == self.seller_handle
@@ -484,6 +487,7 @@ class SellerMessageRouter:
                 preset=PhotoPreset.STUDIO,
                 editor=self.editor,
                 storage=self.storage,
+                reviewer=self.reviewer,
             )
         except Exception:
             with Session(self.engine) as session:

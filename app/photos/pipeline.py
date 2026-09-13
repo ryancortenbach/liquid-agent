@@ -8,6 +8,7 @@ from sqlmodel import Session
 
 from app.models import Item, PhotoRole, PhotoStatus, ProductPhoto
 from app.photos.editor import PhotoPreset, ProductPhotoEditor, build_edit_prompt
+from app.photos.reviewer import PhotoTruthReviewer
 from app.photos.storage import PhotoStorage
 
 
@@ -42,6 +43,7 @@ async def enhance_product_photo(
     preset: PhotoPreset,
     editor: ProductPhotoEditor,
     storage: PhotoStorage,
+    reviewer: PhotoTruthReviewer | None = None,
 ) -> EnhancementResult:
     with Session(engine) as session:
         if session.get(Item, item_id) is None:
@@ -64,6 +66,10 @@ async def enhance_product_photo(
             edit_source.unlink(missing_ok=True)
             raise PhotoItemNotFound("item not found")
         prompt = build_edit_prompt(item, preset)
+        item_title = item.title
+        known_defects = item.constraints_json.get("defects", [])
+        if isinstance(known_defects, str):
+            known_defects = [known_defects]
         original = ProductPhoto(
             item_id=item.id,
             role=PhotoRole.ORIGINAL,
@@ -95,10 +101,27 @@ async def enhance_product_photo(
         original_id = original.id
         enhanced_id = enhanced.id
 
+    truth_disclosure = ""
     try:
         await asyncio.to_thread(editor.edit, edit_source, target.absolute_path, prompt)
         if not target.absolute_path.exists() or target.absolute_path.stat().st_size == 0:
             raise RuntimeError("image editor produced an empty output")
+        if reviewer is not None:
+            truth_check = await reviewer.review(
+                edit_source,
+                target.absolute_path,
+                item_title=item_title,
+                known_defects=known_defects,
+            )
+            if not (
+                truth_check.passed
+                and truth_check.identity_preserved
+                and truth_check.visible_defects_preserved
+            ):
+                raise RuntimeError("automated truth check rejected the enhanced photo")
+            truth_disclosure = (
+                f" Automated truth check passed with {truth_check.confidence:.0%} confidence."
+            )
     except Exception as exc:
         target.absolute_path.unlink(missing_ok=True)
         with Session(engine) as session:
@@ -119,6 +142,7 @@ async def enhance_product_photo(
             raise PhotoPipelineError("photo record was lost")
         ready.status = PhotoStatus.REVIEW
         ready.sha256 = storage.sha256_file(target.absolute_path)
+        ready.disclosure = f"{ready.disclosure}{truth_disclosure}"
         session.add(ready)
         session.commit()
         session.refresh(ready)

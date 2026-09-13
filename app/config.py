@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     openai_image_quality: str = "high"
     openai_image_size: str = "1024x1024"
     openai_vision_model: str = "gpt-5.4-mini"
+    openai_truth_check: bool = True
     identifier_provider: str = "openai"  # openai | claude
     bb_server_url: str = "http://localhost:1234"
     bb_password: str | None = None

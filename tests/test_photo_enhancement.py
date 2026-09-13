@@ -12,6 +12,7 @@ from pillow_heif import from_pillow
 from app.config import Mode, Settings
 from app.main import create_app
 from app.photos.editor import OpenAIProductPhotoEditor
+from app.photos.reviewer import OpenAIPhotoTruthReviewer, PhotoTruthCheck
 
 
 def make_test_jpeg() -> bytes:
@@ -40,6 +41,26 @@ class FakePhotoEditor:
         self.prompts.append(prompt)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"\x89PNG\r\n\x1a\nenhanced-photo")
+
+
+class FakeTruthReviewer:
+    model = "fake-truth-reviewer"
+
+    def __init__(self, passed: bool = True) -> None:
+        self.passed = passed
+        self.calls = 0
+
+    async def review(self, original_path, enhanced_path, *, item_title, known_defects):
+        self.calls += 1
+        assert original_path.exists() and enhanced_path.exists()
+        assert item_title == "Sony WH-1000XM5 headphones"
+        return PhotoTruthCheck(
+            passed=self.passed,
+            identity_preserved=self.passed,
+            visible_defects_preserved=self.passed,
+            confidence=0.94,
+            material_differences=[] if self.passed else ["product shape changed"],
+        )
 
 
 def create_item(client: TestClient) -> str:
@@ -193,3 +214,94 @@ def test_openai_editor_sends_truth_prompt_and_writes_png(tmp_path: Path) -> None
     assert calls[0]["output_format"] == "png"
     assert "response_format" not in calls[0]
     assert calls[0]["prompt"] == "preserve every visible defect"
+
+
+def test_truth_check_passes_before_seller_review(tmp_path: Path) -> None:
+    reviewer = FakeTruthReviewer()
+    app = create_app(
+        Settings(
+            mode=Mode.SIM,
+            database_url="sqlite:///:memory:",
+            photo_storage_dir=str(tmp_path),
+            openai_api_key=None,
+        ),
+        photo_editor=FakePhotoEditor(),
+        photo_reviewer=reviewer,
+    )
+    with TestClient(app) as client:
+        item_id = create_item(client)
+        response = client.post(
+            f"/api/items/{item_id}/photos/enhance",
+            files={"upload": ("headphones.jpg", TEST_JPEG, "image/jpeg")},
+        )
+        assert response.status_code == 201
+        assert reviewer.calls == 1
+        photos = client.get(f"/api/items/{item_id}/photos").json()
+        assert "Automated truth check passed with 94% confidence" in photos[1]["disclosure"]
+
+
+def test_truth_check_blocks_misleading_edit(tmp_path: Path) -> None:
+    app = create_app(
+        Settings(
+            mode=Mode.SIM,
+            database_url="sqlite:///:memory:",
+            photo_storage_dir=str(tmp_path),
+            openai_api_key=None,
+        ),
+        photo_editor=FakePhotoEditor(),
+        photo_reviewer=FakeTruthReviewer(passed=False),
+    )
+    with TestClient(app) as client:
+        item_id = create_item(client)
+        response = client.post(
+            f"/api/items/{item_id}/photos/enhance",
+            files={"upload": ("headphones.jpg", TEST_JPEG, "image/jpeg")},
+        )
+        assert response.status_code == 502
+        photos = client.get(f"/api/items/{item_id}/photos").json()
+        assert photos[1]["status"] == "failed"
+        assert photos[1]["failure_reason"] == "RuntimeError"
+
+
+def test_openai_truth_reviewer_compares_two_images(tmp_path: Path) -> None:
+    calls: list[dict] = []
+
+    class FakeResponses:
+        async def parse(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                output_parsed=PhotoTruthCheck(
+                    passed=True,
+                    identity_preserved=True,
+                    visible_defects_preserved=True,
+                    confidence=0.91,
+                )
+            )
+
+    original = tmp_path / "original.png"
+    enhanced = tmp_path / "enhanced.png"
+    original.write_bytes(TEST_JPEG)
+    enhanced.write_bytes(TEST_JPEG)
+    reviewer = OpenAIPhotoTruthReviewer(
+        "unused-test-key",
+        client=SimpleNamespace(responses=FakeResponses()),
+    )
+
+    import asyncio
+
+    result = asyncio.run(
+        reviewer.review(
+            original,
+            enhanced,
+            item_title="Sony headphones",
+            known_defects=["headband scuff"],
+        )
+    )
+    assert result.passed is True
+    assert calls[0]["store"] is False
+    images = [
+        value
+        for value in calls[0]["input"][0]["content"]
+        if value["type"] == "input_image"
+    ]
+    assert len(images) == 2
