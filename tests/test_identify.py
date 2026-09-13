@@ -14,6 +14,7 @@ from app.inbound.identify import (
 from app.main import create_app
 from app.models import ConversationStatus, Item, LedgerEvent, ProductPhoto, SellerConversation
 from tests.test_listing_flow import (
+    SELLER,
     FakeMessageAdapter,
     FakePhotoEditor,
     make_settings,
@@ -181,3 +182,44 @@ def test_openai_identifier_parses_and_normalizes(tmp_path: Path) -> None:
         fallback.identify(buffer.getvalue(), "image/jpeg", "Sony WH-1000XM5 headphones")
     )
     assert identity.title == "Sony WH-1000XM5 headphones" and identity.confidence == 0.5
+
+
+def test_identify_endpoint_returns_identity_and_applies_to_item(tmp_path: Path) -> None:
+    from io import BytesIO
+
+    from PIL import Image
+
+    app = create_app(make_settings(tmp_path, seller_handle=None), identifier=FakeIdentifier())
+    with TestClient(app) as client:
+        buffer = BytesIO()
+        Image.new("RGB", (16, 12), (1, 2, 3)).save(buffer, format="JPEG")
+        response = client.post(
+            "/api/identify",
+            files={"upload": ("ipad.jpg", buffer.getvalue(), "image/jpeg")},
+            data={"caption": "my ipad"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["title"] == IDENTITY.title and body["question"].startswith("looks like")
+
+        item_id = client.post(
+            "/api/items",
+            json={
+                "seller_handle": SELLER,
+                "title": "Item from iMessage",
+                "market_value_cents": 30_000,
+                "sigma_cents": 3_500,
+                "floor_cents": 22_000,
+                "deadline_hours": 72,
+            },
+        ).json()["item_id"]
+        applied = client.post(
+            "/api/identify",
+            files={"upload": ("ipad.jpg", buffer.getvalue(), "image/jpeg")},
+            data={"caption": "", "item_id": item_id},
+        ).json()
+        assert applied["title_applied"] == IDENTITY.title
+        with Session(app.state.engine) as session:
+            item = session.get(Item, item_id)
+            assert item is not None and item.category == "tablet"
+            assert session.exec(select(LedgerEvent).where(LedgerEvent.action == "identify")).one()

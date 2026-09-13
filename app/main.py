@@ -572,6 +572,48 @@ def create_app(
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
         return result.as_dict()
 
+    @app.post("/api/identify")
+    async def identify_photo(
+        request: Request,
+        upload: Annotated[UploadFile, File()],
+        caption: Annotated[str, Form()] = "",
+        item_id: Annotated[str | None, Form()] = None,
+        engine: EngineDep = None,  # type: ignore[assignment]
+    ) -> dict:
+        """Identify a product photo (and optionally apply the result to an item)."""
+        identifier: Identifier | None = request.app.state.identifier
+        if identifier is None:
+            raise HTTPException(status_code=503, detail="no identifier is configured")
+        content = await upload.read(MAX_PHOTO_BYTES + 1)
+        if not content:
+            raise HTTPException(status_code=422, detail="photo is empty")
+        identity = await identifier.identify(content, upload.content_type or "image/jpeg", caption)
+        payload = identity.model_dump() | {"question": identity.question()}
+        if item_id:
+            with Session(engine) as session:
+                item = session.get(Item, item_id)
+                if item is None:
+                    raise HTTPException(status_code=404, detail="item not found")
+                SellerMessageRouter._apply_identity(item, identity)
+                item.constraints_json = {**item.constraints_json, "identity_confirmed": False}
+                session.add(item)
+                write_decision(
+                    session,
+                    item_id=item.id,
+                    sim_at=request.app.state.clock.now(),
+                    wall_at=request.app.state.clock.wall(),
+                    kind="system",
+                    action="identify",
+                    inputs={"title": identity.title, "confidence": identity.confidence},
+                    reason="identified from the uploaded photo (API)",
+                    price_before=None,
+                    price_after=None,
+                )
+                session.commit()
+                payload["item_id"] = item.id
+                payload["title_applied"] = item.title
+        return payload
+
     @app.post("/api/items/{item_id}/details")
     def add_details(item_id: str, body: DetailsRequest, engine: EngineDep) -> dict:
         with Session(engine) as session:
